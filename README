@@ -1,0 +1,55 @@
+DRAINTASKER - Crawldata to "thumper" (Santa Clara Sun MD) transfers
+================================================================
+full documentation for this project is on the webarchive wiki, 
+currently a hosted JIRA wiki at:
+
+Draintasker - Crawldata to thumper transfers
+https://webarchive.jira.com/wiki/display/~siznax/Draintasker+-+Crawldata+to+thumper+transfers
+
+STATUS
+
+  get-status.sh crawldata_dir xfer_dir
+
+CONFIG
+
+  job_dir       /{crawldata}/{job_name}
+  xfer_job_dir  /{rsync_path}/{job_name}
+  warc_series   {xfer_job_dir}/{warc_series}
+
+  + add [incoming_3] rule to /etc/rsyncd.conf
+  + ensure user petabox user exists: /home-local/petabox
+  + get petabox authorized_keys from "draintasking" crawler
+    @crawling08:~$ scp /home-local/petabox/.ssh/authorized_keys\
+    root@ia400131:/home-local/petabox/.ssh/authorized_keys
+
+PREREQUISITES
+
+  DRAINME      {job_dir}/DRAINME
+  FINISH_DRAIN {job_dir}/FINISH_DRAIN
+
+  PACKED    {warc_series}/PACKED
+  MANIFEST  {warc_series}/MANIFEST
+  LAUNCH    {warc_series}/LAUNCH
+  TASK      {warc_series}/TASK
+  TOMBSTONE {warc_series}/TOMBSTONE
+
+
+Monitor Job and Drain (with dtmon.sh)
+----------------------------------------------------------------
+
+while DRAINME file exists, pack warcs (PACKED), make manifests 
+(MANIFEST), launch transfers (TASK), verify transfers (TOMBSTONE), 
+and finally, delete verified warcs, then sleep for sleep_time 
+seconds before trying again.
+
+  dtmon.sh job_dir xfer_job_dir thumper
+    drain-job job_dir xfer_job_dir thumper
+      pack-warcs.sh       => PACKED
+      make-manifests.sh   => MANIFEST
+      launch-transfers.sh => LAUNCH, TASK
+      verify-transfers.sh => SUCCESS, TOMBSTONE
+      delete-verified-warcs.sh
+
+
+----
+siznax 2009
