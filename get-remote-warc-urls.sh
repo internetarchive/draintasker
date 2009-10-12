@@ -37,14 +37,14 @@ do
 
   (( filesxml_count++ ))
 
-  remote_item=`echo $filesxml | grep -o '[^\/]*'`
+  remote_item=`echo $filesxml | tr '/' ' ' | awk '{print $((NF-1))}'`
   filesxml_url="http://${rhost}/0/items/${filesxml}"
   filesxml_tmp="/tmp/filesxml-${task_id}-${filesxml_count}"
 
-  # echo "==== $filesxml ===="
-  # echo "  remote_item = $remote_item"
-  # echo "  filesxml_url = $filesxml_url"
-  # echo "  filesxml_tmp = $filesxml_tmp"
+  echo "==== $filesxml ===="
+  echo "  remote_item = $remote_item"
+  echo "  filesxml_url = $filesxml_url"
+  echo "  filesxml_tmp = $filesxml_tmp"
 
   # get filesxml
   echo "wget -q $filesxml_url -O $filesxml_tmp"
@@ -58,11 +58,13 @@ do
   # get remote [md5 url] from filesxml
   for l in `cat $filesxml_tmp`
   do
-    if [[ "$l" =~ "^name=" ]]
+
+    if [[ "$l" =~ "name" ]]
     then
       remote_file=`echo $l | tr -d \" | tr "=" " " | awk '{print $NF}'`
     fi
-    if [[ "$l" =~ "\<md5\>.*\<md5\>" ]]
+
+    if [[ "$l" =~ "md5" ]]
     then
       remote_md5=`echo $l | grep -o '>.*<' | tr -d ">" | tr -d "<"`
     fi
@@ -71,6 +73,14 @@ do
 
     if [ -n "$remote_file" ] && [ -n "$remote_md5" ]
     then
+
+      # DEBUG
+      # echo " "
+      # echo $l
+      # echo "  remote_file: " $remote_file 
+      # echo "  remote_md5:  " $remote_md5
+      # echo "  remote_url:  " $remote_url
+
       (( file_count++ ))
       echo "$remote_file $remote_md5 $remote_url"
       remote_file=''
