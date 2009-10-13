@@ -135,6 +135,12 @@ then
     remote_md5=`grep $f $remote_warc_urls_tmp | awk '{print $2}'`
 
     local_filesize=`ls -l $f | awk '{print $5}'`
+
+    if [ -z $remote_warc_url ]
+    then
+      echo "ERROR: remote_warc_url is null!"
+    fi
+
     remote_filesize=`curl -s -I $remote_warc_url\
       | grep -o "Content-Length: [0-9]*" | awk '{print $2}'`
 
