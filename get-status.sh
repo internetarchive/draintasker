@@ -37,13 +37,13 @@ then
   fi
 
   crawled_warcs=`ls -l $1/*.{arc,warc}.gz | wc -l`
-  echo "crawled warcs: $crawled_warcs"
+  echo "crawled w/arcs: $crawled_warcs"
 
   packed_warcs=`find $2 \( -name \*.warc.gz -o -name \*.arc.gz \) | wc -l`
-  echo "packed warcs: $packed_warcs"
+  echo "packed w/arcs: $packed_warcs"
 
   verified_warcs=`find $2 -name "*.tombstone" | wc -l`
-  echo "verified warcs: $verified_warcs"
+  echo "verified w/arcs: $verified_warcs"
 
   num_series=`find $2 -type d | wc -l`
   (( num_series-- ))
@@ -75,6 +75,9 @@ then
 
   echo "disk usage: $3"
   df -h $3
+
+  dtmon=`pgrep -l dtmon`
+  echo "dtmon: $dtmon"
 
 else
   echo "$0 crawldata_dir xfer_dir disk"
