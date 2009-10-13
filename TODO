@@ -3,6 +3,7 @@ TODO
 
 [ ] change "job_dir" to "crawldata_dir" where needed
 [ ] change "xfer_dir" to "xfer_home" in pack-warcs.sh
+[ ] change "thumper" to "dest_host"
 
 [-] validate WARCs
     [x] install WARC Tools
@@ -16,8 +17,8 @@ TODO
 [ ] path to scripts should be specified in a crawl job config file,
     e.g. the DRAINME file
 
-  /3/crawldata/{job}/DRAINME:
-  draintasker: /home/webcrawl/scripts/draintasker/r004
+   /3/crawldata/{job}/DRAINME:
+   draintasker: /home/webcrawl/scripts/draintasker/r004
 
 
 ----
