@@ -230,16 +230,16 @@ then
 
       # validate files in this manifest
       for (( i=0;i<$num_mfiles;i++)); do
-	echo "VALIDATION DISABLED"
+	echo "VALIDATION DISABLED ${mfiles[${i}]}"
         # echo "validating ${mfiles[${i}]}"
         # $warcvalidator -f ${mfiles[${i}]}
-	if [ $? != 0 ]; then
-	  err="ERROR: warc validation failed: ${mfiles[${i}]} $?"
-	  echo $err > $ERROR
-	  exit 2
-	else
-	  ((valid_count++))  
-	fi
+	# if [ $? != 0 ]; then
+	#   err="ERROR: warc validation failed: ${mfiles[${i}]} $?"
+	#   echo $err > $ERROR
+	#   exit 2
+	# else
+	#   ((valid_count++))  
+	# fi
       done       
 
       # move files in this manifest
