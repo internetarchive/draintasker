@@ -43,7 +43,7 @@ then
 
   if [ -n "$5" ]
   then
-    mode=$4
+    mode=$5
   else
     mode=0
   fi
