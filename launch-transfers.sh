@@ -16,6 +16,10 @@
 #  [force]        optionally skip interactive continue
 #  [mode]         single = submit 1 task, then exit
 #
+# DEPENDENCIES
+#
+#  PETABOX_HOME   e.g. '/home/webcrawl/petabox'
+#
 # siznax 2009
 
 usage="$0 xfer_job_dir thumper [force] [mode=single]"
@@ -52,7 +56,7 @@ then
 
   home='home.us.archive.org'
   host=`hostname`
-  rsync_dir="incoming_3"
+  rsync_dir=`echo $1 | tr '/' " " | awk {'print $2"_"$1'}`
   submit="$PETABOX_HOME/sw/bin/thumper_submit_warc_series.php"
 
   echo "  home     : $home"

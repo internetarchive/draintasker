@@ -56,7 +56,7 @@ then
 
   home='home.us.archive.org'
   host=`hostname`
-  rsync_dir="incoming_3"
+  rsync_dir=`echo $1 | tr '/' " " | awk {'print $2"_"$1'}`
   submit="$PETABOX_HOME/sw/bin/thumper_submit_stub.php"
 
   echo "  home     : $home"
