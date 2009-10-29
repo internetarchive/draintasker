@@ -27,11 +27,12 @@ then
   host=`hostname`
   disk_usage=`df -h ${disk} | tail -1 | tr -s ' '`
 
-  echo "==== $job $host ================================"
+  echo "==== $job $host $disk ================================"
   echo "job:" $job 
   echo "host:" $host
   echo "disk:" $disk $disk_usage 
 
+  # crawldata dir
   if [ ! -e ${crawldata} ]
   then 
     echo "ERROR: directory not found: ${crawldata}"
@@ -40,6 +41,7 @@ then
     echo "crawldata:" $crawldata
   fi
 
+  # transfer dir 
   if [ ! -e ${transfer} ]
   then 
     echo "ERROR: directory not found: ${transfer}"
@@ -48,14 +50,15 @@ then
     echo "transfer:" $transfer
   fi
 
+  # DRAINME
   drainme="${crawldata}/DRAINME"
-  finish_drain="${crawldata}/FINISH_DRAIN"
-
   if [ ! -e $drainme ]
   then
     drainme="not found"
   fi
 
+  # FINISH_DRAIN
+  finish_drain="${crawldata}/FINISH_DRAIN"
   if [ ! -e $finish_drain ]
   then
     finish_drain="not found"
