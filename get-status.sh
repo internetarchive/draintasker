@@ -19,45 +19,79 @@
 if [ "$3" ]
 then
 
-  echo "JOB:" `echo $1 | tr '/' ' ' | awk '{print $3}'`
-  echo "host:" `hostname`
-  echo "crawldata:" $1
-  echo "xfer_dir:" $2
+  crawldata=$1
+  transfer=$2
+  disk=$3
 
-  if [ ! -e $1 ]
+  job=`echo $1 | tr '/' ' ' | awk '{print $3}'`
+  host=`hostname`
+  disk_usage=`df -h ${disk} | tail -1 | tr -s ' '`
+
+  echo "==== $job $host ================================"
+  echo "job:" $job 
+  echo "host:" $host
+  echo "disk:" $disk $disk_usage 
+
+  if [ ! -e ${crawldata} ]
   then 
-    echo "ERROR: directory not found: $1"
+    echo "ERROR: directory not found: ${crawldata}"
     exit 2
+  else
+    echo "crawldata:" $crawldata
   fi
-  if [ ! -e $2 ]
 
+  if [ ! -e ${transfer} ]
   then 
-    echo "ERROR: directory not found: $2"
+    echo "ERROR: directory not found: ${transfer}"
     exit 2
+  else
+    echo "transfer:" $transfer
   fi
 
-  crawled_warcs=`ls -l $1/*.{arc,warc}.gz | wc -l`
-  echo "crawled w/arcs: $crawled_warcs"
+  drainme="${crawldata}/DRAINME"
+  finish_drain="${crawldata}/FINISH_DRAIN"
 
-  packed_warcs=`find $2 \( -name \*.warc.gz -o -name \*.arc.gz \) | wc -l`
-  echo "packed w/arcs: $packed_warcs"
+  if [ ! -e $drainme ]
+  then
+    drainme="not found"
+  fi
 
-  verified_warcs=`find $2 -name "*.tombstone" | wc -l`
-  echo "verified w/arcs: $verified_warcs"
+  if [ ! -e $finish_drain ]
+  then
+    finish_drain="not found"
+  fi
 
-  num_series=`find $2 -type d | wc -l`
+  echo "drainme:" $drainme
+  echo "finish_drain:" $finish_drain
+
+  dtmon=`pgrep -l dtmon | tr "\n" " "`
+  echo "dtmon_procs: $dtmon"
+
+  crawled_warcs=`ls -l ${crawldata}/*.{arc,warc}.gz 2> /dev/null | wc -l`
+  echo "crawled_w/arcs: $crawled_warcs"
+
+  packed_warcs=`find ${transfer} \( -name \*.warc.gz -o -name \*.arc.gz \) | wc -l`
+  echo "packed_w/arcs: $packed_warcs"
+
+  tombstones=`find ${transfer} -name "*.tombstone" | wc -l`
+  echo "tombstones: $tombstones"
+
+  num_series=`find ${transfer} -type d | wc -l`
   (( num_series-- ))
-  echo "warc series: $num_series"
+  echo "warc_series: $num_series"
 
   for FILE in PACKED MANIFEST TASK SUCCESS TOMBSTONE
   do
-    files=`find $2 -name "$FILE"`
+    files=`find ${transfer} -name "$FILE"`
     num_files=`echo $files | tr " " "\n" | wc -l`
     last_file=`echo $files | tr " " "\n" | tail -1`
-    echo "$num_files $last_file"
+    if [ -n "$last_file" ]
+    then
+      echo "$num_files $last_file"
+    fi
   done
 
-  open=`find $2 -name "*.open"`
+  open=`find ${transfer} -name "*.open"`
   num_open=`echo $open | tr " " "\n" | wc -l`
   if [ -n "$open" ]
   then
@@ -65,19 +99,13 @@ then
     echo $open | tr " " "\n"
   fi
 
-  errors=`find $2 -name "ERROR"`
+  errors=`find ${transfer} -name "ERROR"`
   num_errors=`echo $errors | tr " " "\n" | wc -l`
   if [ -n "$errors" ]
   then
     echo "found ($num_errors) ERROR files: "
     echo $errors | tr " " "\n"
   fi
-
-  echo "disk usage: $3"
-  df -h $3
-
-  dtmon=`pgrep -l dtmon | tr "\n" " "`
-  echo "dtmon processes: $dtmon"
 
 else
   echo "$0 crawldata_dir xfer_dir disk"
