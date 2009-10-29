@@ -19,7 +19,7 @@
 if [ "$3" ]
 then
 
-  echo "JOB:" `echo $1 | tr '/' ' ' | awk '{print $NF}'`
+  echo "JOB:" `echo $1 | tr '/' ' ' | awk '{print $3}'`
   echo "host:" `hostname`
   echo "crawldata:" $1
   echo "xfer_dir:" $2
@@ -76,8 +76,8 @@ then
   echo "disk usage: $3"
   df -h $3
 
-  dtmon=`pgrep -l dtmon`
-  echo "dtmon: $dtmon"
+  dtmon=`pgrep -l dtmon | tr "\n" " "`
+  echo "dtmon processes: $dtmon"
 
 else
   echo "$0 crawldata_dir xfer_dir disk"
