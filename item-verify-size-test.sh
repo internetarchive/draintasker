@@ -141,8 +141,21 @@ then
       echo "ERROR: remote_warc_url is null!"
     fi
 
-    remote_filesize=`curl -s -I $remote_warc_url\
-      | grep -o "Content-Length: [0-9]*" | awk '{print $2}'`
+    if [ $local_filesize -eq 0 ]
+    then
+      # no "Content-Length" reported by HTTP on zero length files
+      remote_file_status=`curl -s --head $remote_warc_url | head -1`
+      if [[ "$remote_file_status" =~ "200 OK" ]]
+      then
+        remote_filesize=0
+      else
+        echo "WARNING: remote_file_status = $remote_file_status"
+        remote_filesize=''
+      fi
+    else
+      remote_filesize=`curl -s -I $remote_warc_url\
+        | grep -o "Content-Length: [0-9]*" | awk '{print $2}'`
+    fi
 
     if [ $? != 0 ]
     then
@@ -154,7 +167,7 @@ then
     # verbose output
     if [ "$3" ] 
     then
-      echo "  warc_name   : $warc_name"
+      echo "+ warc_name   : $warc_name"
       echo "  local_warc  : $local_warc"
       echo "  remote_warc : $remote_warc_url"
       echo "  manifest_md5: $manifest_md5"
@@ -199,7 +212,7 @@ then
      [ $warc_count != $manifest_count ] ||
      [ $warc_count != $tombstone_count ] 
   then
-    err="ERROR: count mismatch: $packed_count packed $manifest_count manifest $tombstone_count tombstone"
+    err="ERROR: count mismatch: $warc_count warcs $packed_count packed $manifest_count manifest $tombstone_count tombstone"
     echo $err
     exit 9
   else

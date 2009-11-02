@@ -141,8 +141,21 @@ then
       echo "ERROR: remote_warc_url is null!"
     fi
 
-    remote_filesize=`curl -s -I $remote_warc_url\
-      | grep -o "Content-Length: [0-9]*" | awk '{print $2}'`
+    if [ $local_filesize -eq 0 ]
+    then
+      # no "Content-Length" reported by HTTP on zero length files
+      remote_file_status=`curl -s --head $remote_warc_url | head -1`
+      if [[ "$remote_file_status" =~ "200 OK" ]]
+      then
+        remote_filesize=0
+      else
+        echo "WARNING: remote_file_status = $remote_file_status"
+        remote_filesize=''
+      fi
+    else
+      remote_filesize=`curl -s -I $remote_warc_url\
+        | grep -o "Content-Length: [0-9]*" | awk '{print $2}'`
+    fi
 
     if [ $? != 0 ]
     then
