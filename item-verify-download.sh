@@ -105,7 +105,7 @@ then
   if [ $? != 0 ]
   then
     echo "ERROR: get_remote_warc_urls failed with status: $?"
-    exit 9
+    exit 5
   fi
   echo "remote_warc_urls_tmp: $remote_warc_urls_tmp"
   cat $remote_warc_urls_tmp
@@ -142,7 +142,8 @@ then
       echo $err
       echo $err >> $open
       mv $open $ERROR
-      exit 5
+      echo "wrote file: $ERROR"
+      exit 6
     fi
 
     # local_md5
@@ -154,7 +155,7 @@ then
     # verbose output
     if [ "$3" ]
     then
-      echo "  warc_name   : $warc_name"
+      echo "+ warc_name   : $warc_name"
       echo "  local_warc  : $local_warc"
       echo "  manifest_md5: $manifest_md5"
       echo "  remote_warc : $remote_warc_url"
@@ -167,14 +168,14 @@ then
       echo $err
       echo $err >> $open
       mv $open $ERROR
-      exit 6
+      echo "wrote file: $ERROR"
+      exit 7
     fi
+    echo "REMOTE_CHECKSUM_OK $warc_name $remote_md5"
 
     # leave tombstone
-    echo "REMOTE_CHECKSUM_OK $tmp_md5 $warc_name"
-
-    # echo $remote_warc_url > $warc_tombstone
-    # echo $remote_warc_url >> $open
+    echo $remote_warc_url > $warc_tombstone
+    echo $remote_warc_url >> $open
 
     # remove tmp warc
     rm $tmp_warc
@@ -183,7 +184,8 @@ then
       echo $err
       echo $err >> $open
       mv $open $ERROR
-      exit 7
+      echo "wrote file: $ERROR"
+      exit 8
     fi
 
     tmp_warc=''
@@ -198,11 +200,12 @@ then
      [ $warc_count != $manifest_count ] ||
      [ $warc_count != $tombstone_count ] 
   then
-    err="ERROR: count mismatch: $packed_count packed $manifest_count manifest $tombstone_count tombstone"
+    err="ERROR: count mismatch: $warc_count warcs $packed_count packed $manifest_count manifest $tombstone_count tombstone"
     echo $err
     echo $err >> $open
     mv $open $ERROR
-    exit 8
+    echo "wrote file: $ERROR"
+    exit 9
   else
     echo "verified $warc_count warcs $packed_count packed $manifest_count manifest $tombstone_count tombstone"
     mv $open $TOMBSTONE
