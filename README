@@ -1,14 +1,36 @@
 DRAINTASKER - Crawldata to "thumper" (Santa Clara Sun MD) transfers
 ================================================================
+
+DRAIN DAEMON
+  dtmon.sh                   run drain-job periodically
+  drain-job.sh               run draintasker processes in single mode
+
+DRAIN PROCESSING
+  delete-verified-warcs.sh   delete original (verified) w/arcs from each series
+  get-remote-warc-urls.sh    report remote md5 and url for all filesxml in series
+  item-submit-task.sh        submit catalog task for series
+  item-verify-download.sh    wget remote w/arc and verify checksum for series
+  item-verify-size.sh        verify remote size of w/arc series
+  launch-transfers.sh        submit transfer tasks for series
+  make-manifests.sh          compute md5s into series MANIFEST
+  pack-warcs.sh              create warc series when available
+  task-check-success.sh      check and report task success by task_id
+  verify-transfers.sh        run task-check-success and item-verify for series
+
+UTILS
+  addup-warcs.sh             report count and total size of warcs
+  bundle-crawl-artifacts.sh  make tarball of crawldata for permanent storage
+  check-crawldata-staged.sh  report staged crawldata file count and size
+  check-crawldata.sh         report source crawldata file count and size
+  copy-crawldata.sh          copy all crawldata preserving dir structure
+  get-status.sh              report daemons, prerequisites and disk usage
+  make-and-store-bundle.sh   make bundles and scp to staging
+
 full documentation for this project is on the webarchive wiki, 
 currently a hosted JIRA wiki at:
 
 Draintasker - Crawldata to thumper transfers
 https://webarchive.jira.com/wiki/display/~siznax/Draintasker+-+Crawldata+to+thumper+transfers
-
-STATUS
-
-  get-status.sh crawldata_dir xfer_dir
 
 CONFIG
 
@@ -33,22 +55,34 @@ PREREQUISITES
   TASK      {warc_series}/TASK
   TOMBSTONE {warc_series}/TOMBSTONE
 
+PROCESSING 
 
-Monitor Job and Drain (with dtmon.sh)
-----------------------------------------------------------------
+  monitor job and drain (with dtmon.sh) - while DRAINME file exists,
+  pack warcs (PACKED), make manifests (MANIFEST), launch transfers
+  (TASK), verify transfers (TOMBSTONE), and finally, delete verified
+  warcs, then sleep for sleep_time seconds before trying again.
 
-while DRAINME file exists, pack warcs (PACKED), make manifests 
-(MANIFEST), launch transfers (TASK), verify transfers (TOMBSTONE), 
-and finally, delete verified warcs, then sleep for sleep_time 
-seconds before trying again.
+    dtmon.sh job_dir xfer_job_dir thumper
+      drain-job job_dir xfer_job_dir thumper
+        pack-warcs.sh       => PACKED
+        make-manifests.sh   => MANIFEST
+        launch-transfers.sh => LAUNCH, TASK
+        verify-transfers.sh => SUCCESS, TOMBSTONE
+        delete-verified-warcs.sh
 
-  dtmon.sh job_dir xfer_job_dir thumper
-    drain-job job_dir xfer_job_dir thumper
-      pack-warcs.sh       => PACKED
-      make-manifests.sh   => MANIFEST
-      launch-transfers.sh => LAUNCH, TASK
-      verify-transfers.sh => SUCCESS, TOMBSTONE
-      delete-verified-warcs.sh
+STATUS
+
+  get-status.sh crawldata_dir xfer_dir
+
+THUMPER
+
+  the target thumper is reported periodically by petabox ops,
+  and the latest transfers (viewable through catalog) indicate
+  the current/lastest target hostname:
+
+    [to_server] => ia500400.us.archive.org 
+
+  http://home.us.archive.org/catalog.php?search_identifier=move_to_thumper_WS_*&history=1
 
 
 ----
