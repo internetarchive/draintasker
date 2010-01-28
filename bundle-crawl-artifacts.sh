@@ -32,6 +32,9 @@
 #  crawlname = CRAWLNAME
 #  jobsdir   = /0/closure-jobs
 #  jobroot   = /staged-crawljobs/STAGED_JOB
+#  crawlhost = crawler000
+# 
+#  yields /var/tmp/CRAWLNAME-crawler000-{mtime}-bundle.tar.gz
 # 
 # see also:
 #   make-and-store-bundle.sh
@@ -61,9 +64,9 @@ fi
 
 if [ $4 ]
 then
-  host=$4
+  crawlhost=$4
 else
-  host=`hostname | cut -d '.' -f 1`
+  crawlhost=`hostname | cut -d '.' -f 1`
 fi
 
 jobdir=${jobroot}/${jobsdir}/${crawlname}
@@ -72,7 +75,7 @@ mtime=`stat -c %y ${jobdir}\
  | tr -d ':'\
  | tr -d ' '\
  | cut -d '.' -f 1`
-bundle=${crawlname}-${host}-${mtime}-bundle.tar.gz
+bundle=${crawlname}-${crawlhost}-${mtime}-bundle.tar.gz
 
 if [ ! -d ${jobdir} ]
 then
@@ -80,8 +83,9 @@ then
   exit 2
 else
   echo "crawlname: ${crawlname}"
-  echo "jobdir   : ${jobdir}"
+  echo "jobsdir  : ${jobdir}"
   echo "jobroot  : ${jobroot}"
+  echo "crawlhost: ${crawlhost}"
 fi
 
 # potential searchdirs
