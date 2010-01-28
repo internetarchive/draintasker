@@ -19,6 +19,7 @@
 # siznax 2009
 
 verify_count=0
+task_check_count=0
 
 if [ -n "$3" ]
 then
@@ -106,6 +107,8 @@ then
       # check task status
       echo "check_task_success $task_id"
       task_status=`$check_task_success $task_id`
+      echo $task_status
+      (( task_check_count++ ))
 
       if [ $? == 0 ]
       then
@@ -119,19 +122,20 @@ then
 
 	(( verify_count++ ))
 
-        # check mode
-        if [ $mode == 'single' ]
-        then
-          echo "$verify_count series verified"
-          echo "mode = $mode, exiting normally."
-          exit 0
-        fi
-
       else
 
         echo $task_id "TASK SUBMITTED: $TASK"
 
       fi
+
+      # check mode
+      if [ $mode == 'single' ]
+      then
+        echo "$task_check_count tasks checked, $verify_count series verified"
+        echo "mode = $mode, exiting normally."
+        exit 0
+      fi
+
     fi
  
     task_id=''
