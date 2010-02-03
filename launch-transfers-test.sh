@@ -1,12 +1,12 @@
 #!/bin/bash 
 # launch-transfers.sh xfer_job_dir thumper [force] [mode]
 #
-# foreach each item_dir in xfer_job_dir, checks for LAUNCH.open
+# foreach each warc_series in xfer_job_dir, checks for LAUNCH.open
 # and TASK, and if not found, then forms task_args to submit a 
 # catalog task to begin transfers to remote storage 
 #
 #  xfer_job_dir   /{rsync_path}/{JOB}
-#  xfer_item_dir  /{rsync_path}/{JOB}/{warc_series}
+#  xfer_item_dir  {xfer_job_dir}/{warc_series}
 #  warc_series    group of warcs limited by size or count (e.g. 10G)
 #  task_args      manifest crawldata prefix thumper
 #  manifest       "rsync://{host}/{rsync_module}/{manifest_path}"
@@ -73,10 +73,17 @@ then
       OPEN="$d/LAUNCH.open"
       LAUNCH="$d/LAUNCH"
       TASK="$d/TASK-test"
+      ERROR="$d/ERROR"
       warc_series=`echo $d | egrep -o '/([^/]*)$' | tr -d "/"`
 
       crawldata="$d"
       prefix=$warc_series
+
+      # check for ERROR file
+      if [ -e $ERROR ]; then
+        echo "ERROR file exists: $OPEN"
+        continue
+      fi
 
       # check for lock (open file) on this process
       if [ -e $OPEN ]; then
@@ -85,8 +92,8 @@ then
       fi
 
       # don't re-submit the same task
-      if [ -e "$d/TASK" ]; then
-        echo "TASK file exists: $d/TASK"
+      if [ -e $TASK ]; then
+        echo "TASK file exists: $TASK"
         continue
       fi
 
@@ -95,7 +102,9 @@ then
       manifest_count=`cat $MANIFEST | wc -l`
       if [ $manifest_count != $warc_count ] 
       then
-        echo "ERROR: BAD MANIFEST: warc_count=$warc_count manifest_count=$manifest_count"
+        error_msg="ERROR: BAD MANIFEST: warc_count=$warc_count manifest_count=$manifest_count"
+	echo $error_msg
+	echo $error_msg > $ERROR
         exit 1
       fi
       
@@ -132,17 +141,22 @@ then
       # launch task
       sleep 2
       task_output=`ssh ${home} ${submit} ${manifest_rsync_url} ${crawldata} ${prefix} ${thumper}`
-      if [ $? != 0 ]; then
-        echo "ERROR: submit failed with output:" $task_output
-        exit 1
+      if [ $? != 0 ]
+      then
+	error_msg="ERROR: submit failed with output: $task_output"
+        echo $error_msg
+	echo $error_msg > $ERROR
+        exit 2
       else 
         echo "writing task_output to TASK file: $TASK"
         echo $task_output | tr " " "\n" > $TASK
 	if [ $? == 0 ]; then
           cat $TASK | tr " " "\n  "
 	else
-	  echo "ERROR: could not write file: $TASK"
-	  exit 1
+	  error_msg="ERROR: could not write file: $TASK"
+	  echo $error_msg
+	  echo $error_msg > $ERROR
+	  exit 3
 	fi
       fi 
 
@@ -150,8 +164,10 @@ then
       mv $OPEN $LAUNCH
       if [ $? != 0 ]
       then
-        echo "ERROR: failed to mv $OPEN to $LAUNCH"
-        exit 1
+        error_msg="ERROR: failed to mv $OPEN to $LAUNCH"
+	echo $error_msg
+	echo $error_msg > $ERROR
+        exit 4
       else
         echo "mv open file to LAUNCH: $LAUNCH"
       fi
@@ -171,6 +187,7 @@ then
     OPEN=''
     LAUNCH=''
     TASK=''
+    ERROR=''
     task_output=''
 
   done
