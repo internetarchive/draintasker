@@ -108,8 +108,8 @@ then
       echo "check_task_success $task_id"
       (( task_check_count++ )) # increment before we get task_status
       task_status=`$check_task_success $task_id`
-      echo $task_status
 
+      # do not execute anything before checking task_status!
       if [ $? == 0 ]
       then
 
