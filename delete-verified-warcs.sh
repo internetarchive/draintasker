@@ -116,7 +116,7 @@ then
     warc_count=0
   done
 else
-  echo "$0 xfer_job_dir"
+  echo "$0 xfer_job_dir [force]"
   exit 1
 fi
 
