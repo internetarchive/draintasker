@@ -1,7 +1,9 @@
 #!/bin/bash
-# get-status crawldata_dir xfer_dir disk
+# get-status.sh crawldata_dir xfer_dir disk
 # 
 # report 
+#   job, host, disk, crawldata_dir, xfer_dir, drainme files
+#   dtmon procs     PID of currently running dtmon.sh scripts
 #   crawled_warcs   num w/arcs in crawldata_dir
 #   packed_warcs    num w/arcs packed into warc_series
 #   verified_warcs  num w/arcs transferred and verified
