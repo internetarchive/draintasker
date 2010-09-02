@@ -18,7 +18,7 @@
 #
 # DEPENDENCIES
 #
-#  PETABOX_HOME   e.g. '/home/webcrawl/petabox'
+#  PETABOX_HOME   e.g. '/home/user/petabox'
 #
 # siznax 2009
 
@@ -54,12 +54,13 @@ then
   back=`pwd`
   cd $1
 
-  home='home.us.archive.org'
+  # do not ssh to home, use NFS mounted petabox tree
+  # home='home.us.archive.org'
   host=`hostname`
   rsync_dir=`echo $1 | tr '/' " " | awk {'print $2"_"$1'}`
   submit="$PETABOX_HOME/sw/bin/thumper_submit_warc_series.php"
 
-  echo "  home     : $home"
+  # echo "  home     : $home"
   echo "  host     : $host"
   echo "  rsync_dir: $rsync_dir"
   echo "  submit   : $submit"
@@ -124,7 +125,7 @@ then
       echo "  prefix    = $prefix"
       echo "  thumper   = $thumper"
       echo "  mode      = $mode"
-      echo "ssh ${home} submit manifest crawldata prefix thumper"
+      echo "submit manifest crawldata prefix thumper"
 
       if [ -z "$3" ]
       then
@@ -140,7 +141,8 @@ then
 
       # launch task
       sleep 2
-      task_output=`ssh ${home} ${submit} ${manifest_rsync_url} ${crawldata} ${prefix} ${thumper}`
+      task_output=`${submit} ${manifest_rsync_url} ${crawldata} ${prefix} ${thumper}`
+      
       if [ $? != 0 ]
       then
 	error_msg="ERROR: submit failed with output: $task_output"

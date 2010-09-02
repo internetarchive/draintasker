@@ -33,7 +33,8 @@ then
   LAUNCH="$xfer_item_dir/LAUNCH"
   thumper_script="$PETABOX_HOME/sw/bin/thumper_submit_warc_series.php"
   stub="$PETABOX_HOME/sw/bin/thumper_submit_stub.php"
-  home="home.us.archive.org"
+  # do not ssh to home, use NFS mounted petabox tree
+  # home="home.us.archive.org"
 
   if [ -e $LAUNCH ]
   then
@@ -77,8 +78,8 @@ then
 
     # launch task
     sleep 2
-    echo "ssh home submit manifest crawldata prefix thumper > TASK"
-    output=`ssh $home $submit $manifest $crawldata $prefix $thumper > $TASK`
+    echo "submit manifest crawldata prefix thumper > TASK"
+    output=`$submit $manifest $crawldata $prefix $thumper > $TASK`
     cat $TASK
     exit 0
 
