@@ -72,6 +72,9 @@ then
   dtmon=`pgrep -l dtmon | tr "\n" " "`
   echo "dtmon_procs: $dtmon"
 
+  dtmon_s3=`pgrep -l dtmon-s3 | tr "\n" " "`
+  echo "dtmon_S3_procs: $dtmon_s3"
+
   crawled_warcs=`ls -l ${crawldata}/*.{arc,warc}.gz 2> /dev/null | wc -l`
   echo "crawled_w/arcs: $crawled_warcs"
 

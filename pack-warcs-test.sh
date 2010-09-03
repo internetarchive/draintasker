@@ -58,8 +58,7 @@ then
     exit 1
   fi
 
-  GB=$(( 1000000 * 1024 ))
-  std_warc_size=$GB
+  std_warc_size=$(( 1024 * 1024 * 1024 )) # 1 gibibyte
   max_size=$(( $3 * $std_warc_size ))
   warc_series=''
   warcs_per_series=$(( $max_size / $std_warc_size ))

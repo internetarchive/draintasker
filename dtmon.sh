@@ -6,20 +6,20 @@
 # run like this: 
 #
 #   $ screen 
-#   $ ./dtmon.sh job_dir xfer_job_dir thumper >> log_file &
-#   $ tail -f log_file
+#   $ ./dtmon.sh job_dir xfer_job_dir thumper | tee -a log_file
 #
 #  DRAINME       {job_dir}/DRAINME
 #  job_dir       /{crawldata}/{job_name}
 #  xfer_job_dir  /{rsync_path}/{job_name}
 #  thumper       destination storage node
 #  sleep_time    seconds to sleep between checks for DRAINME file
+#  dtmon.cfg     configuration params in this file
 #
 # siznax 2009
 
 usage="$0 job_dir xfer_job_dir thumper"
 
-sleep_time=3600
+sleep_time=`grep sleep_time dtmon.cfg | cut -d ' ' -f 2`
 
 if [ -n "$3" ]
 then
