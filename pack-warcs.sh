@@ -14,6 +14,7 @@
 #   [force]      do not query user
 #   [mode]       single = pack only 1 series and exit
 #
+#   CONFIG       ./dtmon.cfg
 #   DRAINME      /{crawldata}/{JOB}/DRAINME
 #   warc_series  {prefix}-{timestamp}-{first}-{last}-{crawler}
 #                prefix    w/arc file prefix
@@ -38,15 +39,36 @@ function query_user {
   fi
 }
 
+function set_warc_series_1 {
+  # naming scheme change broke this!
+  # https://webarchive.jira.com/browse/HER-1727
+  #
+  # WAS {TLA}-{timestamp}-{serial}-{fqdn}.warc.gz
+  # IS  {TLA}-{timestamp}-{serial}-{PID}~{fqdn}~{port}.warc.gz
+
+  b=`echo $f | cut -d '.' -f 1 | grep -o "[^/]*" | tail -1`
+  crawler=`echo $b | cut -d '~' -f 2`
+  first_serial=`echo $b | tr "-" " " | awk '{print $((NF-1))}'`
+  timestamp=`echo $b | tr "-" " " | awk '{print $((NF-2))}'`
+  prefix=`echo $b | sed "s/-${timestamp}-${first_serial}-${crawler}//"`
+  warc_series="${prefix}-${timestamp}-${first_serial}"
+}
+
+function set_warc_series_2 {
+  b=`echo $f | cut -d '.' -f 1`
+  prefix=`echo $b | cut -d '-' -f 1`
+  timestamp=`echo $b | cut -d '-' -f 2`
+  first_serial=`echo $b | cut -d '-' -f 3`
+  crawler=`echo $b | cut -d '~' -f 2`
+  warc_series="${prefix}-${timestamp}-${first_serial}"
+}
+
+################################################################
+
 if [ -n "$3" ]
 then
 
-  if [ -n "$5" ]
-  then
-    mode=$5
-  else
-    mode=0
-  fi
+  if [ -n "$5" ]; then mode=$5; else mode=0; fi
 
   echo $0 `date`
 
@@ -78,6 +100,7 @@ then
   # fi
 
   open="$job_dir/PACKED.open"
+  CONFIG="${PWD}/dtmon.cfg"
   PACKED="$job_dir/PACKED"
   ERROR="$job_dir/ERROR"
   DRAINME="$job_dir/DRAINME"
@@ -85,11 +108,20 @@ then
   total_num_warcs=`ls $job_dir/*.{arc,warc}.gz | wc -l`
   total_size_warcs=`./addup-warcs.sh $job_dir | awk '{print $4}'`
   est_num_series=$(( $total_num_warcs / $warcs_per_series )) 
+  warc_naming=`grep ^WARC_naming $CONFIG | tr -s ' '\
+    | cut -d ' ' -f 2 | tail -1`
+
+  if [ -z $warc_naming ]
+  then 
+    echo "ERROR: must select warc_naming scheme in CONFIG: $CONFIG"
+    exit 1
+  fi
 
   echo "  DRAINME          = $DRAINME"
   echo "  job_dir          = $job_dir"
   echo "  xfer_home        = $xfer_home"
   echo "  job_name         = $job_name"
+  echo "  warc_naming      = $warc_naming"
   echo "  max_series_size  = ${3}GB ($max_size)"
   echo "  std_warc_size    = $std_warc_size (1GB)"
   echo "  warcs_per_series = $warcs_per_series"
@@ -149,12 +181,12 @@ then
     # begin warc_series
     if [ -z $warc_series ]
     then
-      b=`echo $f | cut -d '.' -f 1`
-      crawler=`echo $b | tr "-" " " | awk '{print $NF}'`
-      first_serial=`echo $b | tr "-" " " | awk '{print $((NF-1))}'`
-      timestamp=`echo $b | tr "-" " " | awk '{print $((NF-2))}'`
-      prefix=`echo $b | sed "s/-${timestamp}-${first_serial}-${crawler}//"`
-      warc_series="${prefix}-${timestamp}-${first_serial}"
+      if [ $warc_naming == 1 ]
+      then
+        set_warc_series_1
+      else
+        set_warc_series_2
+      fi
     fi
 
     # last warc
@@ -171,12 +203,15 @@ then
       if [ "$is_last_warc" == 'true' ] 
       then
         last_warc_count=$(($mcount + 1))
-        echo "mfiles["${mcount}"]" ${mfiles[${mcount}]} $warc_series $fsize $msize 
+        echo "mfiles[${mcount}] ${mfiles[${mcount}]}"\
+             "$warc_series $fsize $msize"
         if [ -e $FINISH_DRAIN ]
         then
-          echo "FINISH_DRAIN file found, packing last warcs ($last_warc_count)"
+          echo "FINISH_DRAIN file found, packing last warcs"\
+               "($last_warc_count)"
         else
-          echo "FINISH_DRAIN file not found, leaving last warcs ($last_warc_count)"
+          echo "FINISH_DRAIN file not found, leaving last warcs"\
+               "($last_warc_count)"
 	  continue
         fi
       fi
@@ -186,18 +221,23 @@ then
       # finish warc series
       if [ "$is_last_warc" == 'true' ]
       then
-        last_serial=`echo "${mfiles[${mcount}]}" | awk '{l=split($job_dir, a, "-"); printf(a[l-1]);}'`
+        last_serial=`echo "${mfiles[${mcount}]}"\
+	    | awk '{l=split($job_dir, a, "-"); printf(a[l-1]);}'`
         num_mfiles=$(( ${#mfiles[@]} ))
         (( mcount++ ))
         warc_series="${warc_series}-${last_serial}-${crawler}"
         pack_info="$warc_series $mcount $msize"
       else
-        last_serial=`echo "${mfiles[${mcount}-1]}" | awk '{l=split($job_dir, a, "-"); printf(a[l-1]);}'`
+        last_serial=`echo "${mfiles[${mcount}-1]}"\
+            | awk '{l=split($job_dir, a, "-"); printf(a[l-1]);}'`
         num_mfiles=$(( ${#mfiles[@]} - 1 ))
         warc_series="${warc_series}-${last_serial}-${crawler}"
         pack_info="$warc_series $mcount $prev_msize"
       fi 
       xfer_dir="$xfer_home/${warc_series}"
+
+echo
+echo "WARNING: WARC naming may have changed, check series: $warc_series"
 
       echo " "
       echo "==== $pack_info  ====  "
@@ -269,12 +309,12 @@ then
 
       # start next warc_series
       echo " "
-      b=`echo $f | cut -d '.' -f 1`
-      crawler=`echo $b | tr "-" " " | awk '{print $NF}'`
-      first_serial=`echo $b | tr "-" " " | awk '{print $((NF-1))}'`
-      timestamp=`echo $b | tr "-" " " | awk '{print $((NF-2))}'`
-      prefix=`echo $b | sed "s/-${timestamp}-${first_serial}-${crawler}//"`
-      warc_series="${prefix}-${timestamp}-${first_serial}"
+      if [ $warc_naming == 1 ]
+      then
+        set_warc_series_1
+      else
+        set_warc_series_2
+      fi
 
       # reset item/manifest
       msize=$fsize
@@ -288,7 +328,8 @@ then
 
     if [ "$is_last_warc" != 'true' ]
     then
-      echo "mfiles["${mcount}"]" ${mfiles[${mcount}]} $warc_series $fsize $msize 
+      echo "mfiles[${mcount}] ${mfiles[${mcount}]}"\
+           "$warc_series $fsize $msize"
     fi
 
     ((mcount++))
@@ -312,5 +353,6 @@ else
   exit 1
 fi
 
-echo "$total_num_warcs warcs $valid_count validated $pack_count packed $series_count series"
+echo "$total_num_warcs warcs $valid_count validated $pack_count"\
+     "packed $series_count series"
 echo "$0 Done." `date`
