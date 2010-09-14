@@ -87,12 +87,12 @@ then
 
   for FILE in PACKED MANIFEST TASK SUCCESS TOMBSTONE
   do
-    files=`find ${transfer} -name "$FILE"`
+    files=`find ${transfer} -name "$FILE" | sort`
     num_files=`echo $files | tr " " "\n" | wc -l`
     last_file=`echo $files | tr " " "\n" | tail -1`
     if [ -n "$last_file" ]
     then
-      echo "$num_files $last_file"
+      echo "  $num_files $last_file"
     fi
   done
 
@@ -101,7 +101,7 @@ then
   if [ -n "$open" ]
   then
     echo "found ($num_open) open files: "
-    echo $open | tr " " "\n"
+    for f in `echo $open`; do echo "  $f"; done
   fi
 
   retry=`find ${transfer} -name "RETRY*"`
@@ -109,7 +109,7 @@ then
   if [ -n "$retry" ]
   then
     echo "found ($num_retry) RETRY files: "
-    echo $retry | tr " " "\n"
+    for f in `echo $retry`; do echo "  $f"; done
   fi
 
   errors=`find ${transfer} -name "ERROR"`
@@ -117,7 +117,7 @@ then
   if [ -n "$errors" ]
   then
     echo "found ($num_errors) ERROR files: "
-    echo $errors | tr " " "\n"
+    for f in `echo $errors`; do echo "  $f"; done
   fi
 
 else
