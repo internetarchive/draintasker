@@ -25,7 +25,7 @@
 #   MANIFEST  {warc_series}/MANIFEST
 #
 # OUTPUT
-#  
+#
 #   LAUNCH     {warc_series}/LAUNCH
 #   TASK       {warc_series}/TASK
 #   SUCCESS    {warc_series}/SUCCESS
@@ -63,12 +63,12 @@ function set_tHR { # human-readable date format
 }
 
 # ISO 8601 date format
-function set_tISO { 
+function set_tISO {
     # sort of hard-coded, could use date +%Y-%m-%dT%H:%M:%S%Z -d blah
     tISO=`echo ${t:0:4}-${t:4:2}-${t:6:2}T${t:8:2}:${t:10:2}:${t:12:2}Z`
 }
 
-# we could do something more sophisticated here for more 
+# we could do something more sophisticated here for more
 # human readable date ranges
 function set_date_range {
 
@@ -151,22 +151,27 @@ function write_tombstone {
 
 # 0 return code means curl succeeded
 # 201 response_code means S3 succeeded
-# output has the format: 
+# output has the format:
 #   [response_code] [size_upload] [time_total]
 # /var/tmp/curl.out.$$ has the HTTP-header of the response
 
 function check_curl_success {
     if [ $? == 0 ]
-    then 
+    then
         echo_curl_output
         echo "curl finished with status: $?" | tee -a $OPEN
         response_code=`echo $output | cut -d ' ' -f 1`
-        if [ "$response_code" == "201" ]
+        if [ "$response_code" == "201" ] # SUCCESS
         then
-            keep_trying='false'
     	    echo "SUCCESS: S3 PUT succeeded with response_code:"\
                  "$response_code" | tee -a $OPEN
-	    if [ -n "$tombstone" ]; then write_tombstone; fi
+	    if [ $upload_type == "auto-make-bucket" ]
+            then 
+                bucket_status=1
+            else
+                write_tombstone
+	    fi
+            keep_trying='false'
         else
     	    echo "ERROR: S3 PUT failed with response_code:"\
                  "$response_code at "`date +%Y-%m-%dT%T%Z`\
@@ -228,6 +233,10 @@ function check_curl_success {
 }
 
 function curl_s3 {
+    if [ $retry_count -gt 0 ]
+    then
+        echo "RETRY attempt (${retry_count})" `date` | tee -a $OPEN
+    fi
     echo "curl ${copts} http://${s3}/${bucket}/${filename} -o $tmpfile"\
       | sed -e 's/--/\n  --/g'\
       | sed -e 's/ http/\n  http/'\
@@ -240,10 +249,11 @@ function curl_s3 {
         output=`eval ${curl_cmd}`
         check_curl_success
     else
-	keep_trying='false'
         echo | tee -a $OPEN
         echo ">>> THIS IS ONLY A TEST! <<<" | tee -a $OPEN
         echo | tee -a $OPEN
+	keep_trying='false'
+	bucket_status=1
     fi
 }
 
@@ -268,7 +278,8 @@ then
   do
 
     MANIFEST="$d/MANIFEST"
-    if [ -e "$MANIFEST" ]; then
+    if [ -e "$MANIFEST" ]
+    then
 
       CONFIG="${back}/dtmon.cfg"
       OPEN="$d/LAUNCH.open"
@@ -289,7 +300,7 @@ then
       if [ -e $RETRY ]
       then
 	  echo "RETRY file exists with epoch: "`cat $RETRY`
-	  
+
           now=`date +%s`
           retry_time=`cat $RETRY`
 
@@ -308,7 +319,7 @@ then
 	      mv $RETRY $RETRY.${retry_time}
 
 	      echo "moving aside blocking files" | tee -a $OPEN
-	      for blocker in $OPEN $ERROR $TASK 
+	      for blocker in $OPEN $ERROR $TASK
               do
 	          aside="${blocker}.${retry_time}"
 		  if [ -f $blocker ]
@@ -320,40 +331,31 @@ then
               done
           fi
       fi
-      
-      # check for ERROR file
-      if [ -e $ERROR ]; then
-        echo "ERROR file exists: $ERROR"
-        continue
-      fi
 
-      # check for OPEN file
-      if [ -e $OPEN ]; then
-        echo "OPEN file exists: $OPEN"
-        continue
-      fi
+      # check for files locking this series
+      locking_files=($OPEN $ERROR $LAUNCH $TASK)
+      locking_keys=(LAUNCH.open ERROR LAUNCH TASK)
+      n_lock_files=${#locking_files[@]}
+      for (( l=0; l < n_lock_files ; l++ ))
+      do
+          lock=${locking_keys[$l]}
+          lock_file=${locking_files[$l]}
+          if [ -e $lock_file ]
+          then
+              echo "$lock file exists: $lock_file"
+              continue 2
+          fi
+      done
 
-      # check for LAUNCH file
-      if [ -e $LAUNCH ]; then
-        echo "LAUNCH file exists: $LAUNCH"
-        continue
-      fi
-
-      # don't re-submit the same task
-      if [ -e $TASK ]; then
-        echo "TASK file exists: $TASK"
-        continue
-      fi
-
-      echo "==== $warc_series ===="
-      echo "crawldata: $crawldata"
-      echo "mode: $mode"
-      echo "  CONFIG:    $CONFIG"
-      echo "  MANIFEST:  $MANIFEST"
-      echo "  OPEN:      $OPEN"
-      echo "  TASK:      $TASK"
-      echo "  SUCCESS:   $SUCCESS"
-      echo "  TOMBSTONE: $TOMBSTONE"
+      echo "==== $warc_series ===="  | tee -a $OPEN
+      echo "crawldata: $crawldata"   | tee -a $OPEN
+      echo "mode: $mode"             | tee -a $OPEN
+      echo "  CONFIG:    $CONFIG"    | tee -a $OPEN
+      echo "  MANIFEST:  $MANIFEST"  | tee -a $OPEN
+      echo "  OPEN:      $OPEN"      | tee -a $OPEN
+      echo "  TASK:      $TASK"      | tee -a $OPEN
+      echo "  SUCCESS:   $SUCCESS"   | tee -a $OPEN
+      echo "  TOMBSTONE: $TOMBSTONE" | tee -a $OPEN
 
       if [ $force == 0 ]; then query_user; fi
 
@@ -383,10 +385,10 @@ then
       # --------------------------------------------------------------
       nfiles_manifest=`grep [^[:alnum:]] $MANIFEST | wc -l`
       nfiles_found=${#files[@]}
-      
+
       echo "  nfiles_manifest = ${nfiles_manifest}" | tee -a $OPEN
       echo "  nfiles_found = ${nfiles_found}" | tee -a $OPEN
-      
+
       if [ ${nfiles_manifest} -ne ${nfiles_found} ]
       then
           echo "ERROR: count mis-match:"\
@@ -412,7 +414,7 @@ then
       # parse series
       ws_date=`echo $warc_series | cut -d '-' -f 2`
       cdate=`echo ${ws_date:0:6}`
-      
+
       # get reports
       reports="No reports found for crawljob: $crawljob"
 
@@ -431,7 +433,7 @@ then
       start_date=${start}
       end_serial=`echo $warc_series | cut -d '-' -f 4`
       end_date=${end}
-      
+
       echo "metadata                      "
       echo "  bucket       = $bucket      "
       echo "  mediatype    = $mediatype   "
@@ -441,12 +443,12 @@ then
       echo "  collection2  = $collection2 "
       echo "  subject      = $subject     "
       echo "  derive       = $derive      "
-      echo "  num_warcs    = $num_warcs   " 
-      echo "  size_hint    = $size_hint   " 
-      echo "  start_serial = $start_serial" 
-      echo "  start_date   = $start_date  " 
-      echo "  end_serial   = $end_serial  " 
-      echo "  end_date     = $end_date    " 
+      echo "  num_warcs    = $num_warcs   "
+      echo "  size_hint    = $size_hint   "
+      echo "  start_serial = $start_serial"
+      echo "  start_date   = $start_date  "
+      echo "  end_serial   = $end_serial  "
+      echo "  end_date     = $end_date    "
 
       echo "Creating item: http://archive.org/details/${bucket}" | tee -a $OPEN
 
@@ -477,10 +479,28 @@ then
        --header \"authorization: LOW ${access_key}:${secret_key}\"\
        --write-out '%{http_code} %{size_upload} %{time_total}'\
        --upload-file ${filepath}"
-      curl_s3
+      retry_count=0
+      keep_trying='true'
+      upload_type="auto-make-bucket"
+      bucket_status=0
+      until [ $keep_trying == 'false' ] # RETRY loop
+      do
+          curl_s3
+      done
+
+      # if auto-make-bucket has failed, do not try to upload warcs
+      if [ $bucket_status -eq 0 ]
+      then
+	  echo "Create (auto-make-bucket) failed: $bucket" | tee -a $OPEN
+	  echo "aborting series: $warc_series" | tee -a $OPEN
+	  continue
+      else
+          echo "item/bucket created successfully: $bucket" | tee -a $OPEN
+      fi
 
       # 2) add WARCs to newly created item (upload-file)
       # ----------------------------------------------------------------
+      echo "----" | tee -a $OPEN
       echo "Uploading (${num_warcs}) warcs with size hint: $size_hint bytes"\
         | tee -a $OPEN
       for (( i = 0 ; i < ${#files[@]} ; i++ )) # ADD-TO-ITEM loop
@@ -491,13 +511,10 @@ then
           tombstone="${filepath}.tombstone"
           retry_count=0
           keep_trying='true'
+          upload_type="add-file-to-bucket"
           until [ $keep_trying == 'false' ] # RETRY loop
           do
               echo "----" | tee -a $OPEN
-	      if [ $retry_count -gt 0 ]
-              then
-                  echo "RETRY attempt (${retry_count})" | tee -a $OPEN
-              fi
               echo "["$((${i}+1))"/${#files[@]}]: ${filename}" | tee -a $OPEN
               copts="--include --location\
                      --header \"authorization: LOW ${access_key}:${secret_key}\"\
@@ -507,10 +524,10 @@ then
               curl_s3
           done
       done
-        
+
 
       # /CURL S3 <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-      
+
       # write success, tombstone files
       if [ $TEST == "false" ]
       then
@@ -554,7 +571,7 @@ then
 
   cd $back
 
-else 
+else
   echo $usage
   exit 1
 fi
