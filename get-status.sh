@@ -1,7 +1,8 @@
 #!/bin/bash
 # get-status.sh crawldata_dir xfer_dir disk
 # 
-# report 
+# reports
+# 
 #   job, host, disk, crawldata_dir, xfer_dir, drainme files
 #   dtmon procs     PID of currently running dtmon.sh scripts
 #   crawled_warcs   num w/arcs in crawldata_dir
@@ -15,9 +16,10 @@
 #   n TOMBSTONE     num TOMBSTONE files and last w/arc series TOMBSTONE path
 #   .open files extant
 #   ERROR files extant
-#   disk usage
+#   RETRY files extant
 # 
 # siznax 2009
+
 if [ "$3" ]
 then
 
@@ -29,7 +31,7 @@ then
   host=`hostname`
   disk_usage=`df -h ${disk} | tail -1 | tr -s ' '`
 
-  echo "==== $job $host $disk ================================"
+  echo "====" $job $host $disk "===="
   echo "job:" $job 
   echo "host:" $host
   echo "disk:" $disk $disk_usage 
@@ -52,14 +54,12 @@ then
     echo "transfer:" $transfer
   fi
 
-  # DRAINME
   drainme="${crawldata}/DRAINME"
   if [ ! -e $drainme ]
   then
     drainme="not found"
   fi
 
-  # FINISH_DRAIN
   finish_drain="${crawldata}/FINISH_DRAIN"
   if [ ! -e $finish_drain ]
   then
@@ -85,7 +85,7 @@ then
   (( num_series-- ))
   echo "warc_series: $num_series"
 
-  for FILE in PACKED MANIFEST TASK SUCCESS TOMBSTONE
+  for FILE in PACKED MANIFEST TASK SUCCESS TOMBSTONE RETRY
   do
     files=`find ${transfer} -name "$FILE" | sort`
     num_files=`echo $files | tr " " "\n" | wc -l`
@@ -96,29 +96,20 @@ then
     fi
   done
 
-  open=`find ${transfer} -name "*.open"`
-  num_open=`echo $open | tr " " "\n" | wc -l`
-  if [ -n "$open" ]
-  then
-    echo "found ($num_open) open files: "
-    for f in `echo $open`; do echo "  $f"; done
-  fi
+  extras=('*.open' 'RETRY*' 'ERROR' )
+  kinds=(OPEN RETRY ERROR)
 
-  retry=`find ${transfer} -name "RETRY*"`
-  num_retry=`echo $retry | tr " " "\n" | wc -l`
-  if [ -n "$retry" ]
-  then
-    echo "found ($num_retry) RETRY files: "
-    for f in `echo $retry`; do echo "  $f"; done
-  fi
-
-  errors=`find ${transfer} -name "ERROR"`
-  num_errors=`echo $errors | tr " " "\n" | wc -l`
-  if [ -n "$errors" ]
-  then
-    echo "found ($num_errors) ERROR files: "
-    for f in `echo $errors`; do echo "  $f"; done
-  fi
+  for (( i=0; i < ${#extras[@]}; i++ ))
+  do
+      found=`find ${transfer} -name "${extras[$i]}" | sort`
+      num_found=`echo $found | tr " " "\n" | wc -l`
+      if [ -n "$found" ]
+      then
+        echo "found ($num_found) ${kinds[$i]} files: "
+        for f in `echo $found`; do echo "  $f"; done
+      fi
+      unset found
+  done
 
 else
   echo "$0 crawldata_dir xfer_dir disk"
