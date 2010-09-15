@@ -160,6 +160,7 @@ function schedule_retry {
     then
         echo $retry_epoch > $RETRY
     fi
+    abort_series=1
 }
 
 # 0 return code means curl succeeded
@@ -247,7 +248,7 @@ function curl_s3 {
 
         sleep 10
         # [response_code] [size_upload] [time_total]
-	output="201 000 000"
+	output="000 000 000"
 	# curl blah
         check_curl_success
 
@@ -494,6 +495,7 @@ then
 	  continue
       else
           echo "item/bucket created successfully: $bucket" | tee -a $OPEN
+          abort_series=0
       fi
 
       # 2) add WARCs to newly created item (upload-file)
@@ -509,7 +511,7 @@ then
           tombstone="${filepath}.tombstone"
           retry_count=0
           keep_trying='true'
-          upload_type="add-file-to-bucket"
+          upload_type="add-to-bucket"
           until [ $keep_trying == 'false' ] # RETRY loop
           do
               echo "----" | tee -a $OPEN
@@ -520,6 +522,11 @@ then
                      --write-out '%{http_code} %{size_upload} %{time_total}'\
                      --upload-file ${filepath}"
               curl_s3
+	      if [ $abort_series -eq 1 ]
+              then
+                   echo "aborting warc_series: $warc_series" | tee -a $OPEN
+                   continue 3
+              fi
           done
       done
 
