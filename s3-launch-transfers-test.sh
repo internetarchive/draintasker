@@ -149,6 +149,19 @@ function write_tombstone {
     echo $download > $tombstone
 }
 
+function schedule_retry {
+    keep_trying='false'
+    retry_epoch=$((`date +%s`+${retry_delay_5xx}))
+    echo "RETRY: attempt (${retry_count}) scheduled"\
+         "after ${retry_delay_5xx} seconds:"\
+         `date +%Y-%m-%dT%T%Z -d @${retry_epoch}`\
+         | tee -a $OPEN
+    if [ ! -f $RETRY ]
+    then
+        echo $retry_epoch > $RETRY
+    fi
+}
+
 # 0 return code means curl succeeded
 # 201 response_code means S3 succeeded
 # output has the format:
@@ -173,62 +186,41 @@ function check_curl_success {
 	    fi
             keep_trying='false'
         else
+            (( retry_count++ ))
     	    echo "ERROR: S3 PUT failed with response_code:"\
                  "$response_code at "`date +%Y-%m-%dT%T%Z`\
                  | tee -a $OPEN
-	    if [ ${response_code} == "000" ] # curl failed with status 0!
+            if [ ${response_code} == "000" ] || [ ${response_code:0:1} == "4" ]
             then
-                (( retry_count++ ))
-                echo "RETRY: sleep for ${retry_delay_4xx} seconds..."\
-                     | tee -a $OPEN
-		sleep ${retry_delay_4xx}
-		echo "done sleeping at "`date +%Y-%m-%dT%T%Z`\
-                     | tee -a $OPEN
-	    elif [ ${response_code:0:1} == "4" ] # 4xx
-            then
-                (( retry_count++ ))
-                echo "RETRY: sleep for ${retry_delay_4xx} seconds..."\
-                     | tee -a $OPEN
-		sleep ${retry_delay_4xx}
-		echo "done sleeping at "`date +%Y-%m-%dT%T%Z`\
-                     | tee -a $OPEN
-            elif [ ${response_code:0:1} == "5" ] # 5xx
-            then
-		keep_trying='false'
-                (( retry_count++ ))
-		retry_epoch=$((`date +%s`+${retry_delay_5xx}))
-		echo "RETRY: attempt (${retry_count}) scheduled"\
-                     "after ${retry_delay_5xx} seconds:"\
-                     `date +%Y-%m-%dT%T%Z -d @${retry_epoch}`\
-                     | tee -a $OPEN
-		if [ ! -f $RETRY ]
+		# curl failed with status 0! OR 4xx HTTP response
+		if [ $retry_count -gt $max_block_retry_count ]
                 then
-		    echo $retry_epoch > $RETRY
+		    echo "RETRY count ($retry_count) "\
+                         "exceeds max_block_retry_count: "\
+                         $max_block_retry_count\
+                         | tee -a $OPEN
+                    schedule_retry
+                else
+                    echo "RETRY: sleep for ${retry_delay_4xx} seconds..."\
+                         | tee -a $OPEN
+		    sleep ${retry_delay_4xx}
+		    echo "done sleeping at "`date +%Y-%m-%dT%T%Z`\
+                         | tee -a $OPEN
                 fi
+            elif [ ${response_code:0:1} == "5" ]
+            then
+                # 5xx HTTP response
+		schedule_retry
             else
-                echo "Aborting!" | tee -a $OPEN
-                mv $TASK $ERROR
-                exit 3
+                # un-handled HTTP response
+		schedule_retry
             fi
         fi
     else
 	echo_curl_output
-
         echo "ERROR: curl failed with status: $?" | tee -a $OPEN
-        # echo "Aborting!" | tee -a $OPEN
-        # cp $OPEN $ERROR
-        # exit 4
-
-	# retry on curl failure
-        keep_trying='false'
         (( retry_count++ ))
-        retry_epoch=$((`date +%s`+${retry_delay_5xx}))
-        echo "RETRY: attempt (${retry_count}) scheduled"\
-             "after ${retry_delay_5xx} seconds, at"\
-             `date +%Y-%m-%dT%T%Z -d @${retry_epoch}`\
-             | tee -a $OPEN
-        echo $retry_epoch > $RETRY
-
+	schedule_retry
     fi
 }
 
@@ -252,8 +244,13 @@ function curl_s3 {
         echo | tee -a $OPEN
         echo ">>> THIS IS ONLY A TEST! <<<" | tee -a $OPEN
         echo | tee -a $OPEN
-	keep_trying='false'
-	bucket_status=1
+
+        sleep 10
+        # [response_code] [size_upload] [time_total]
+	output="201 000 000"
+	# curl blah
+        check_curl_success
+
     fi
 }
 
@@ -299,17 +296,17 @@ then
       # handle (5xx) RETRY file
       if [ -e $RETRY ]
       then
-	  echo "RETRY file exists with epoch: "`cat $RETRY`
+	  echo "  RETRY file exists: $RETRY ["`cat $RETRY`"]" | tee -a $OPEN
 
           now=`date +%s`
           retry_time=`cat $RETRY`
 
           if [ $now -lt $retry_time ]
           then
-	      echo "RETRY delay (now=${now} < retry_time=$retry_time)"\
+	      echo "    RETRY delay (now=${now} < retry_time=$retry_time)"\
                    | tee -a $OPEN
-	      echo "exiting normally." | tee -a $OPEN
-	      exit 0
+	      echo "    skipping series: $warc_series" | tee -a $OPEN
+	      continue
           else
               echo "RETRY OK (now=$now > retry_time=$retry_time)" | tee -a $OPEN
 
@@ -415,6 +412,7 @@ then
       test_suffix=`grep ^test_suffix $CONFIG | tr -s ' ' | cut -d ' ' -f 2`
       retry_delay_4xx=`grep ^retry_delay_4xx $CONFIG | tr -s ' ' | cut -d ' ' -f 2`
       retry_delay_5xx=`grep ^retry_delay_5xx $CONFIG | tr -s ' ' | cut -d ' ' -f 2`
+      max_block_retry_count=`grep ^max_block_retry_count $CONFIG | tr -s ' ' | cut -d ' ' -f 2`
 
       # parse series
       ws_date=`echo $warc_series | cut -d '-' -f 2`
@@ -465,7 +463,6 @@ then
       # --------------------------------------------------------------
       filepath=$MANIFEST
       filename=`echo $filepath | grep -o "[^/]*$"`".txt"
-      echo "----" | tee -a $OPEN
       copts="--include --location\
        --header 'x-amz-auto-make-bucket:1'\
        --header 'x-archive-meta-mediatype:${mediatype}'\
@@ -493,6 +490,7 @@ then
       bucket_status=0
       until [ $keep_trying == 'false' ] # RETRY loop
       do
+	  echo "-----" | tee -a $OPEN
           curl_s3
       done
 
