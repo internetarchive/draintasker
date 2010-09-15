@@ -85,7 +85,7 @@ then
   (( num_series-- ))
   echo "warc_series: $num_series"
 
-  for FILE in PACKED MANIFEST TASK SUCCESS TOMBSTONE RETRY
+  for FILE in PACKED MANIFEST TASK SUCCESS TOMBSTONE
   do
     files=`find ${transfer} -name "$FILE" | sort`
     num_files=`echo $files | tr " " "\n" | wc -l`
