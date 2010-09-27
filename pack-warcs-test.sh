@@ -1,5 +1,6 @@
 #!/bin/bash 
-# pack-warcs.sh job_dir xfer_dir max_size [force] [mode]
+#
+# pack-warcs-test.sh job_dir xfer_dir max_size warc_naming [force] [mode]
 #
 # if DRAINME file exists, find <= max_size (in GB) of W/ARCs
 # in job_dir, create warc_series_dir in xfer_dir, move series
@@ -8,14 +9,20 @@
 # if FINISH_DRAIN file found, then pack last warcs even 
 # if << max_size
 #
-#   job_dir      /{crawldata}/{JOB}
-#   xfer_dir     /{rsync_path}/{JOB}
+#   job_dir      /{0,1,2,3}/crawling/{crawljob}/warcs
+#   xfer_dir     /{0,1,2,3}/incoming/{crawljob}
 #   max_size     max size in GB of warcs to be transferred
-#   [force]      do not query user
+#   [force]      1 = do not query user
 #   [mode]       single = pack only 1 series and exit
 #
-#   CONFIG       ./dtmon.cfg
-#   DRAINME      /{crawldata}/{JOB}/DRAINME
+# PREREQUISITES
+#
+#   DRAINME      /{job_dir}/DRAINME
+#   FINISH_DRAIN /{job_dir}/FINISH_DRAIN
+#                (optional, for finish draining)
+#
+# OUTPUT
+#
 #   warc_series  {prefix}-{timestamp}-{first}-{last}-{crawler}
 #                prefix    w/arc file prefix
 #                timestamp timestamp of first w/arc in series
@@ -23,11 +30,10 @@
 #                last      serial number of last warc in series
 #                crawler   crawl host from warc filename
 #   PACKED       /{xfer_dir}/{warc_series}/PACKED
-#   FINISH_DRAIN /{crawldata}/{JOB}/FINISH_DRAIN
 #
 # siznax 2009
 
-usage="$0 job_dir xfer_dir max_size [force] [mode=single]"
+usage="$0 job_dir xfer_dir max_size warc_naming [force] [mode=single]"
 
 function query_user {
   echo "Continue [Y/n]> "
@@ -65,14 +71,20 @@ function set_warc_series_2 {
 
 ################################################################
 
-if [ -n "$3" ]
+if [ -n "$4" ]
 then
 
-  if [ -n "$5" ]; then mode=$5; else mode=0; fi
+  job_dir=$1
+  xfer_home=$2
+  max_GB=$3  
+  warc_naming=$4
+  force=$5
+  mode=$6
+
+  if [ -z $force ]; then force=0; fi
+  if [ -z $mode  ]; then mode=0;  fi
 
   echo $0 `date`
-
-  job_dir=$1
 
   if [ ! -d $job_dir ]
   then
@@ -81,12 +93,9 @@ then
   fi
 
   std_warc_size=$(( 1024 * 1024 * 1024 )) # 1 gibibyte
-  max_size=$(( $3 * $std_warc_size ))
+  max_size=$(( $max_GB * $std_warc_size ))
   warc_series=''
   warcs_per_series=$(( $max_size / $std_warc_size ))
-
-  job_name=`echo $job_dir | tr '/' " " | awk '{print $NF}'`
-  xfer_home=$2
 
   # check for warcvalidator on path ($WARC_TOOLS/app/warcvalidator)
   # 
@@ -100,30 +109,20 @@ then
   # fi
 
   open="$job_dir/PACKED.open"
-  CONFIG="${PWD}/dtmon.cfg"
   PACKED="$job_dir/PACKED"
   ERROR="$job_dir/ERROR"
   DRAINME="$job_dir/DRAINME"
   FINISH_DRAIN="$job_dir/FINISH_DRAIN"
-  total_num_warcs=`ls $job_dir/*.{arc,warc}.gz | wc -l`
+  total_num_warcs=`ls $job_dir/*.{arc,warc}.gz 2>/dev/null | wc -l`
   total_size_warcs=`./addup-warcs.sh $job_dir | awk '{print $4}'`
   est_num_series=$(( $total_num_warcs / $warcs_per_series )) 
-  warc_naming=`grep ^WARC_naming $CONFIG | tr -s ' '\
-    | cut -d ' ' -f 2 | tail -1`
-
-  if [ -z $warc_naming ]
-  then 
-    echo "ERROR: must select warc_naming scheme in CONFIG: $CONFIG"
-    exit 1
-  fi
 
   echo "  DRAINME          = $DRAINME"
   echo "  job_dir          = $job_dir"
   echo "  xfer_home        = $xfer_home"
-  echo "  job_name         = $job_name"
   echo "  warc_naming      = $warc_naming"
-  echo "  max_series_size  = ${3}GB ($max_size)"
   echo "  std_warc_size    = $std_warc_size (1GB)"
+  echo "  max_series_size  = $max_size (${max_GB}GB)"
   echo "  warcs_per_series = $warcs_per_series"
   echo "  total_num_warcs  = $total_num_warcs"
   echo "  total_size_warcs = $total_size_warcs"
@@ -133,10 +132,7 @@ then
   echo "  PACKED           = $PACKED"
   echo "  mode             = $mode"
 
-  if [ -z "$4" ]
-  then
-    query_user
-  fi
+  if [ $force == 0 ]; then query_user; fi
 
   # look for DRAINME
   if [ ! -e $DRAINME ]

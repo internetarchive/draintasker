@@ -1,11 +1,13 @@
 #!/bin/bash
-# drain-job.sh job_dir xfer_job_dir thumper
+# drain-job.sh job_dir xfer_job_dir thumper max_size warc_naming
 #
 # run draintasker processes on a crawl job in single mode.
 # the idea here is to keep a crawl draining while not spending
 # too much time on any one process. if there is a  backlog of
 # prerequisites, then each task can be run in a separate 
 # process in non-single mode to catch up.
+#
+# SEE ALSO
 #
 #  pack-warcs.sh
 #  make-manifests.sh
@@ -15,14 +17,16 @@
 #
 # siznax 2009
 
-usage="$0 job_dir xfer_job_dir thumper"
+usage="$0 job_dir xfer_job_dir thumper max_size warc_naming"
 
-if [ -n "$3" ]
+if [ -n "$5" ]
 then
 
   job_dir=$1
   xfer_job_dir=$2
   thumper=$3
+  max_size=$4
+  warc_naming=$5
 
   echo $0 `date`
 
@@ -36,7 +40,7 @@ then
     fi
 
     # pack a single series
-    ./pack-warcs.sh $job_dir $xfer_job_dir 10 1 single
+    ./pack-warcs.sh $job_dir $xfer_job_dir $max_size $warc_naming 1 single 
     if [ $? != 0 ]
     then
       echo "ERROR packing warcs: $?"

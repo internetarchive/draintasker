@@ -1,24 +1,29 @@
-#!/bin/bash 
-# s3-launch-transfers.sh xfer_job_dir [force] [mode]
+#!/bin/bash
+#
+# s3-launch-transfers.sh config [force] [mode]
 #
 # foreach warc_series in xfer_job_dir, submit an S3 HTTP request
 # to upload files to remote storage - unless one of the 
 # following files exists: LAUNCH, LAUNCH.open, ERROR, TASK
 #
-#  xfer_job_dir   /{rsync_path}/{JOB}
-#  [force]        optionally skip interactive continue
-#  [mode]         single = submit 1 task, then exit
+#  config   config params in this file
+#  [force]  optionally skip interactive continue
+#  [mode]   single = submit 1 task, then exit
 #
-# DEPENDENCIES
+# CONFIGURATION
 #
-#   CONFIG  ./dtmon.cfg
-#           access_key
-#           secret_key
-#           title_prefix
-#           collection_prefix
-#           test_suffix
-#           retry_delay_4xx
-#           retry_delay_5xx
+#   config
+#     xfer_dir
+#     title_prefix
+#     collection_prefix
+#     test_suffix
+#     block_delay
+#     max_block_count
+#     retry_delay
+#
+#   $HOME/.ias3cfg
+#     access_key
+#     secret_key
 #
 # INPUT
 #
@@ -33,7 +38,7 @@
 #
 # siznax 2010
 
-usage="$0 xfer_job_dir [force] [mode=single]"
+usage="$0 config [force] [mode=single]"
 
 TEST='false'
 s3='s3.us.archive.org'
@@ -68,8 +73,8 @@ function set_tISO {
     tISO=`echo ${t:0:4}-${t:4:2}-${t:6:2}T${t:8:2}:${t:10:2}:${t:12:2}Z`
 }
 
-# we could do something more sophisticated here for more
-# human readable date ranges
+# we could do something more sophisticated here
+# for more human readable date ranges
 function set_date_range {
 
     # get warc start date
@@ -78,6 +83,9 @@ function set_date_range {
       | grep -o "[0-9]\{17\}"`
     set_tISO
     start=${tISO}
+    scandate=${t:0:14}
+    metadate=${t:0:4}
+    first_date=$t
 
     # get warc end date
     if [ ${#files[@]} -gt 1 ]
@@ -89,6 +97,7 @@ function set_date_range {
             | grep -o "[0-9]\{17\}"`
         set_tISO
         end=${tISO}
+        last_date=$t
     fi
 
     if [ -z $end ]
@@ -151,9 +160,9 @@ function write_tombstone {
 
 function schedule_retry {
     keep_trying='false'
-    retry_epoch=$((`date +%s`+${retry_delay_5xx}))
+    retry_epoch=$((`date +%s`+${retry_delay}))
     echo "RETRY: attempt (${retry_count}) scheduled"\
-         "after ${retry_delay_5xx} seconds:"\
+         "after ${retry_delay} seconds:"\
          `date +%Y-%m-%dT%T%Z -d @${retry_epoch}`\
          | tee -a $OPEN
     if [ ! -f $RETRY ]
@@ -194,17 +203,17 @@ function check_curl_success {
             if [ ${response_code} == "000" ] || [ ${response_code:0:1} == "4" ]
             then
 		# curl failed with status 0! OR 4xx HTTP response
-		if [ $retry_count -gt $max_block_retry_count ]
+		if [ $retry_count -gt $max_block_count ]
                 then
 		    echo "RETRY count ($retry_count) "\
-                         "exceeds max_block_retry_count: "\
-                         $max_block_retry_count\
+                         "exceeds max_block_count: "\
+                         $max_block_count\
                          | tee -a $OPEN
                     schedule_retry
                 else
-                    echo "RETRY: sleep for ${retry_delay_4xx} seconds..."\
+                    echo "BLOCK: sleep for ${block_delay} seconds..."\
                          | tee -a $OPEN
-		    sleep ${retry_delay_4xx}
+		    sleep ${block_delay}
 		    echo "done sleeping at "`date +%Y-%m-%dT%T%Z`\
                          | tee -a $OPEN
                 fi
@@ -218,8 +227,8 @@ function check_curl_success {
             fi
         fi
     else
-	echo_curl_output
         echo "ERROR: curl failed with status: $?" | tee -a $OPEN
+	echo_curl_output
         (( retry_count++ ))
 	schedule_retry
     fi
@@ -231,7 +240,9 @@ function curl_s3 {
         echo "RETRY attempt (${retry_count})" `date` | tee -a $OPEN
     fi
     echo "curl ${copts} http://${s3}/${bucket}/${filename} -o $tmpfile"\
-      | sed -e 's/--/\n  --/g'\
+      | sed -e 's/--header/\n  --header/g'\
+      | sed -e 's/--write-out/\n  --write-out/g'\
+      | sed -e 's/--upload-file/\n  --upload-file/g'\
       | sed -e 's/ http/\n  http/'\
       | sed -e 's/warc.gz,/warc.gz,\n    /g'\
       | sed -e 's/-o /\n  -o /'\
@@ -262,15 +273,31 @@ launch_count=0
 if [ -n "$1" ]
 then
 
-  if [ "$2" == "1" ]; then force=1; else force=0; fi
-  if [ -n "$3" ]; then mode=$3; else mode='kickass'; fi
+  force=$2
+  mode=$3
+
+  if [ -z $force ]; then force=0; fi
+  if [ -z $mode  ]; then mode=0;  fi
 
   echo $0 `date`
 
-  xfer_job_dir="$1"
+  CONFIG=$1
+  S3CFG=$HOME/.ias3cfg
+
+  if [ ! -f $CONFIG ] && [ ! -f $S3CFG ]
+  then
+      echo "ERROR: config or s3cfg not found"
+      exit 1
+  elif [ ${CONFIG:0:1} != '/' ]
+  then
+      echo "ERROR: must give fullpath for config: $CONFIG"
+      exit 1
+  else
+      xfer_job_dir=`grep ^xfer_dir $CONFIG | awk '{print $2}'`
+  fi
 
   back=`pwd`
-  cd $1
+  cd $xfer_job_dir
 
   for d in `find $xfer_job_dir -type d | sort`
   do
@@ -279,7 +306,6 @@ then
     if [ -e "$MANIFEST" ]
     then
 
-      CONFIG="${back}/dtmon.cfg"
       OPEN="$d/LAUNCH.open"
       LAUNCH="$d/LAUNCH"
       RETRY="$d/RETRY"
@@ -349,6 +375,7 @@ then
       echo "crawldata: $crawldata"   | tee -a $OPEN
       echo "mode: $mode"             | tee -a $OPEN
       echo "  CONFIG:    $CONFIG"    | tee -a $OPEN
+      echo "  S3CFG:     $S3CFG"     | tee -a $OPEN
       echo "  MANIFEST:  $MANIFEST"  | tee -a $OPEN
       echo "  OPEN:      $OPEN"      | tee -a $OPEN
       echo "  TASK:      $TASK"      | tee -a $OPEN
@@ -400,54 +427,84 @@ then
 	  set_date_range
       fi
 
+      # get keys
+      access_key=`grep access_key $S3CFG | awk '{print $3}'`
+      secret_key=`grep secret_key $S3CFG | awk '{print $3}'`
+
       # parse config
-      access_key=`grep ^s3_access_key $CONFIG  | tr -s ' ' | cut -d ' ' -f 2`
-      secret_key=`grep ^s3_secret_key $CONFIG  | tr -s ' ' | cut -d ' ' -f 2`
-      title_prefix=`grep ^title_prefix $CONFIG | tr -s ' ' | cut -d '"' -f 2`
-      collection_prefix=`grep ^collection_prefix $CONFIG | tr -s ' ' | cut -d ' ' -f 2`
-      test_suffix=`grep ^test_suffix $CONFIG | tr -s ' ' | cut -d ' ' -f 2`
-      retry_delay_4xx=`grep ^retry_delay_4xx $CONFIG | tr -s ' ' | cut -d ' ' -f 2`
-      retry_delay_5xx=`grep ^retry_delay_5xx $CONFIG | tr -s ' ' | cut -d ' ' -f 2`
-      max_block_retry_count=`grep ^max_block_retry_count $CONFIG | tr -s ' ' | cut -d ' ' -f 2`
+      collection_prefix=`grep ^collection_prefix $CONFIG | awk '{print $2}'`
+      title_prefix=`grep ^title_prefix $CONFIG | cut -d \" -f 2`
+      test_suffix=`grep ^test_suffix $CONFIG | awk '{print $2}'`
+      block_delay=`grep ^block_delay $CONFIG | awk '{print $2}'`
+      max_block_count=`grep ^max_block_count $CONFIG | awk '{print $2}'`
+      retry_delay=`grep ^retry_delay $CONFIG | awk '{print $2}'`
 
       # parse series
       ws_date=`echo $warc_series | cut -d '-' -f 2`
       cdate=`echo ${ws_date:0:6}`
 
-      # get reports
-      reports="No reports found for crawljob: $crawljob"
-
       # bucket metadata
       bucket="${warc_series}${test_suffix}"
       mediatype='web'
       title="${title_prefix} ${date_range}"
-      description=${reports}
       collection1="${collection_prefix}_${cdate}"
       collection2='webwidecrawl'
       subject='crawldata'
       derive=0
       num_warcs=${nfiles_manifest}
       size_hint=$(( $std_warc_size * $num_warcs )) # in gibibytes
-      start_serial=`echo $warc_series | cut -d '-' -f 3`
-      start_date=${start}
-      end_serial=`echo $warc_series | cut -d '-' -f 4`
-      end_date=${end}
+      first_serial=`echo $warc_series | cut -d '-' -f 3`
+      last_serial=`echo $warc_series | cut -d '-' -f 4`
 
-      echo "metadata                      "
-      echo "  bucket       = $bucket      "
+      # metadata per BK, intended to be like books
+      #   Subject: metadata for the web stuff going into the paired archive
+      #   Date:  2010-09-18T12:16:00PDT
+      scanner=`hostname -f`
+      creator=`grep ^creator $CONFIG | cut -d \" -f 2`
+      sponsor=`grep ^sponsor $CONFIG | cut -d \" -f 2`
+      # scandate (using 14-digits of timestamp of first warc in series)
+      # metadate (like books, the year)
+      operator=`grep ^operator $CONFIG | awk '{print $2}'`
+      scancenter=`grep ^scanningcenter $CONFIG | awk '{print $2}'`
+      access="http://www.archive.org/details/${bucket}"
+      crawler_version=`zcat ${files[0]} | head | grep software | awk '{print $2}'`
+
+      # description => reports TBD
+      description="$crawler $crawljob $first_date $first_serial $last_serial $num_warcs $size_hint"
+
+      # this breaks if CONIG is not fqpn
+      if [ -z $creator ] || [ -z $sponsor ] || [ -z $scancenter ] || [ -z $operator ]
+      then
+          echo "ERROR some null metadata. must give fullpath to config." | tee -a $OPEN
+          echo "Aborting." | tee -a $OPEN
+          exit 1          
+      fi
+
+      echo "metadata:"
       echo "  mediatype    = $mediatype   "
       echo "  title        = $title       "
       echo "  description  = $description "
       echo "  collection1  = $collection1 "
       echo "  collection2  = $collection2 "
       echo "  subject      = $subject     "
-      echo "  derive       = $derive      "
-      echo "  num_warcs    = $num_warcs   "
-      echo "  size_hint    = $size_hint   "
-      echo "  start_serial = $start_serial"
-      echo "  start_date   = $start_date  "
-      echo "  end_serial   = $end_serial  "
-      echo "  end_date     = $end_date    "
+
+      echo "    scanner        = '${scanner}'"
+      echo "    creator        = '${creator}'"
+      echo "    scandate       = '${scandate}'"
+      echo "    date           = '${metadate}'"
+      echo "    sponsor        = '${sponsor}'"
+      echo "    scanningcenter = '${scancenter}'"
+      echo "    operator       = '${operator}'"
+      echo "    id...-access   = '${access}'"
+      echo "    crawler        = ${crawler_version}"
+
+      echo "  crawjob      = $crawljob"
+      echo "  num_warcs    = $num_warcs"
+      echo "  size_hint    = $size_hint"
+      echo "  first_serial = $first_serial"
+      echo "  first_date   = $first_date"
+      echo "  last_serial  = $last_serial"
+      echo "  last_date    = $last_date"
 
       echo "Creating item: http://archive.org/details/${bucket}" | tee -a $OPEN
 
@@ -459,22 +516,31 @@ then
       filename=`echo $filepath | grep -o "[^/]*$"`".txt"
       copts="--include --location\
        --header 'x-amz-auto-make-bucket:1'\
+       --header 'x-archive-queue-derive:${derive}'\
+       --header 'x-archive-size-hint:${size_hint}'\
+       --header \"authorization: LOW ${access_key}:${secret_key}\"\
        --header 'x-archive-meta-mediatype:${mediatype}'\
        --header 'x-archive-meta01-collection:${collection1}'\
        --header 'x-archive-meta02-collection:${collection2}'\
        --header \"x-archive-meta-title:${title}\"\
        --header \"x-archive-meta-description:${description}\"\
        --header 'x-archive-meta-subject:${subject}'\
-       --header 'x-archive-meta-crawler:${crawler}'\
-       --header 'x-archive-meta-num_warcs:${num_warcs}'\
-       --header 'x-archive-meta-size_hint:${size_hint}'\
-       --header 'x-archive-meta-start_serial:${start_serial}'\
-       --header 'x-archive-meta-start_date:${start_date}'\
-       --header 'x-archive-meta-end_serial:${end_serial}'\
-       --header 'x-archive-meta-end_date:${end_date}'\
-       --header 'x-archive-queue-derive:${derive}'\
-       --header 'x-archive-size-hint:${size_hint}'\
-       --header \"authorization: LOW ${access_key}:${secret_key}\"\
+       --header 'x-archive-meta-scanner:${scanner}'\
+       --header \"x-archive-meta-creator:${creator}\"\
+       --header 'x-archive-meta-scandate:${scandate}'\
+       --header 'x-archive-meta-date:${metadate}'\
+       --header \"x-archive-meta-sponsor:${sponsor}\"\
+       --header 'x-archive-meta-scanningcenter:${scancenter}'\
+       --header 'x-archive-meta-operator:${operator}'\
+       --header 'x-archive-meta-identifier-access:${access}'\
+       --header 'x-archive-meta-crawler:${crawler_version}'\
+       --header 'x-archive-meta-crawljob:${crawljob}'\
+       --header 'x-archive-meta-num--warcs:${num_warcs}'\
+       --header 'x-archive-meta-size--hint:${size_hint}'\
+       --header 'x-archive-meta-first--serial:${first_serial}'\
+       --header 'x-archive-meta-first--date:${first_date}'\
+       --header 'x-archive-meta-last--serial:${last_serial}'\
+       --header 'x-archive-meta-last--date:${last_date}'\
        --write-out '%{http_code} %{size_upload} %{time_total}'\
        --upload-file ${filepath}"
       retry_count=0
@@ -524,7 +590,7 @@ then
               curl_s3
 	      if [ $abort_series -eq 1 ]
               then
-                   echo "aborting warc_series: $warc_series" | tee -a $OPEN
+                   echo "Aborting warc_series: $warc_series" | tee -a $OPEN
                    continue 3
               fi
           done

@@ -1,74 +1,100 @@
 #!/bin/bash
 #
-# s3 draintasker monitor - s3-dtmon.sh job_dir xfer_job_dir 
-#
 # while DRAINME file exists, run drain-job.sh then sleep for sleep_time
+#
+# s3-dtmon.sh config
+#
+#   config  config params in this file, see dtmon.cfg
 #
 # run like this: 
 #
 #   $ screen 
-#   $ ./dtmon.sh job_dir xfer_job_dir | tee -a log_file
+#   $ ./s3-dtmon.sh config | tee -a log_file
 #
-#  DRAINME       {job_dir}/DRAINME
-#  job_dir       /{crawldata}/{job_name}
-#  xfer_job_dir  /{rsync_path}/{job_name}
-#  sleep_time    seconds to sleep between checks for DRAINME file
-#  dtmon.cfg     configuration params in this file
-#  ~/.s3cfg      http://archive.org/help/abouts3.txt
+# PREREQUISITES
+#
+#   DRAINME  {job_dir}/DRAINME
+#
+# DEPENDENCIES
+#
+#   ~/.ias3cfg  put your keys here, see abouts3
+#
+# CONFIGURATION PARAMS
+#
+#   job_dir     /{crawldata}/{job_name}
+#   xfer_dir    /{rsync_path}/{job_name}
+#   max_size    max size in GB of warcs to be transferred
+#   sleep_time  seconds to sleep between checks for DRAINME file
+#
+# PREREQUISITES
+#
+#   DRAINME  {job_dir}/DRAINME
+#
+# SEE ALSO
+#
+#   http://archive.org/help/abouts3.txt
 #
 # siznax 2010
 
-usage="$0 job_dir xfer_job_dir"
+usage="$0 config"
 
-if [ -n "$2" ]
+if [ -n "$1" ]
 then
 
-  CONFIG="./dtmon.cfg"
-  
-  job_dir=$1
-  xfer_job_dir=$2
-  DRAINME="$job_dir/DRAINME"
+  CONFIG=$1
+  S3CFG="$HOME/.ias3cfg"
+
+  if [ ! -f $CONFIG ]
+  then
+      echo "ERROR: config file not found: $CONFIG"
+      exit 1
+  elif [ ${CONFIG:0:1} != '/' ]
+  then
+      echo "ERROR: must give fullpath for config: $CONFIG"
+      exit 1
+  else
+      job_dir=`grep ^job_dir $CONFIG | awk '{print $2}'`
+      DRAINME="$job_dir/DRAINME"
+      sleep_time=`grep ^sleep_time $CONFIG | awk '{print $2}'`
+  fi
 
   echo $0 `date`
 
-  while [ -e $DRAINME ]
+  while [ 1 ]
   do
 
-    # parse config
-    sleep_time=`grep ^sleep_time    $CONFIG | tr -s ' ' | cut -d ' ' -f 2`
-    access_key=`grep ^s3_access_key $CONFIG | tr -s ' ' | cut -d ' ' -f 2`
-    secret_key=`grep ^s3_secret_key $CONFIG | tr -s ' ' | cut -d ' ' -f 2`
-    
-    # check config
-    if [ -z $sleep_time ]
+    if [ -e $DRAINME ]
     then
-        echo "ERROR: null sleep_time, aborting."
-        exit 1
-    elif [ $access_key == 'YOUR_ACCESS_KEY' ]
-    then
-        echo "ERROR: config needs $access_key"
-        exit 1
-    elif [ $secret_key == 'YOUR_SECRET_KEY' ]
-    then
-        echo "ERROR: config needs $secret_key"
-        exit 1
+
+        ./s3-validate-config.sh $CONFIG $S3CFG
+        
+        if [ $? == 0 ]
+        then
+            xfer_dir=`grep ^xfer_dir $CONFIG | awk '{print $2}'`
+            max_size=`grep ^max_size $CONFIG | awk '{print $2}'`
+            sleep_time=`grep ^sleep_time $CONFIG | awk '{print $2}'`
+            warc_naming=`grep ^WARC_naming $CONFIG | awk '{print $2}'`
+        else
+            echo "ERROR: invalid config: $CONFIG"
+            exit 1
+        fi
+        
+        # echo "Aborting."
+        # exit 99
+        
+        echo "s3-drain-job.sh $job_dir $xfer_dir $max_size $warc_naming"
+        ./s3-drain-job.sh $job_dir $xfer_dir $max_size $warc_naming $CONFIG
+
     else
-        echo "config OK"
-        echo "  sleep_time = $sleep_time"
-        echo "  access_key = $access_key"
-        echo "  secret_key = $secret_key"
+
+        echo "DRAINME file not found: $DRAINME"
     fi
 
-    echo "s3-drain-job.sh $job_dir $xfer_job_dir"
-    ./s3-drain-job.sh $job_dir $xfer_job_dir
-
+    sleep_time=`grep ^sleep_time $CONFIG | awk '{print $2}'`
     echo "sleeping $sleep_time seconds at" `date`
     sleep $sleep_time
 
   done
-
-  echo "DRAINME file not found: $DRAINME"
-  exit 1
 
 else
   echo $usage

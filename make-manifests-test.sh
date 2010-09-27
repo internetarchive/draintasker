@@ -69,12 +69,17 @@ then
         exit 1
       fi
 
-      for f in `ls *.{arc,warc}.gz`; do
+      for f in `ls *.{arc,warc}.gz 2>/dev/null`; do
 
         (( warc_count++ ))
 
         echo "md5sum $f >> OPEN"
         # md5sum $f >> $open
+        if [ $? != 0 ]
+        then
+            echo "ERROR: md5sum failed with status: $?"
+            exit 2
+        fi
         
       done
 

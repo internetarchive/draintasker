@@ -1,12 +1,14 @@
 #!/bin/bash
 #
-# s3-drain-job-s3.sh job_dir xfer_job_dir 
+# s3-drain-job-s3.sh job_dir xfer_job_dir max_size warc_naming
 #
 # run draintasker processes on a crawl job in single mode.
 # the idea here is to keep a crawl draining while not spending
 # too much time on any one process. if there is a backlog of
 # prerequisites, then each task can be run in a separate 
 # process in non-single mode to catch up.
+#
+# SEE ALSO
 #
 #  pack-warcs.sh
 #  make-manifests.sh
@@ -15,13 +17,16 @@
 #
 # siznax 2010
 
-usage="$0 job_dir xfer_job_dir"
+usage="$0 job_dir xfer_job_dir max_size warc_naming config"
 
-if [ -n "$2" ]
+if [ -n "$5" ]
 then
 
   job_dir=$1
   xfer_job_dir=$2
+  max_size=$3
+  warc_naming=$4
+  CONFIG=$5
 
   echo $0 `date`
 
@@ -35,7 +40,7 @@ then
     fi
 
     # pack a single series
-    ./pack-warcs.sh $job_dir $xfer_job_dir 10 1 single
+    ./pack-warcs.sh $job_dir $xfer_job_dir $max_size $warc_naming 1 single
     if [ $? != 0 ]
     then
       echo "ERROR packing warcs: $?"
@@ -51,7 +56,7 @@ then
     fi
 
     # launch a single task
-    ./s3-launch-transfers.sh $xfer_job_dir 1 single
+    ./s3-launch-transfers.sh $CONFIG 1 single
     if [ $? != 0 ]
     then
       echo "ERROR launching transfers: $?"

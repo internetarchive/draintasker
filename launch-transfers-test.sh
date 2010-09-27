@@ -1,4 +1,5 @@
 #!/bin/bash 
+#
 # launch-transfers.sh xfer_job_dir thumper [force] [mode]
 #
 # foreach each warc_series in xfer_job_dir, checks for LAUNCH.open
@@ -39,12 +40,11 @@ launch_count=0
 if [ -n "$2" ]
 then
 
-  if [ -n "$4" ]
-  then
-    mode=$4
-  else
-    mode=0
-  fi
+  force=$3
+  mode=$4
+
+  if [ -z $force ]; then force=0; fi
+  if [ -z $mode  ]; then mode=0;  fi
 
   echo $0 `date`
 
@@ -127,7 +127,7 @@ then
       echo "  mode      = $mode"
       echo "submit manifest crawldata prefix thumper"
 
-      if [ -z "$3" ]
+      if [ $force == 0 ]
       then
         query_user
       fi
