@@ -16,19 +16,23 @@ fi
 
 job_dir=`grep ^job_dir $CONFIG | awk '{print $2}'`
 xfer_dir=`grep ^xfer_dir $CONFIG | awk '{print $2}'`
+
 DRAINME="$job_dir/DRAINME"
-max_size=`grep ^max_size $CONFIG | awk '{print $2}'`
+
 sleep_time=`grep ^sleep_time $CONFIG | awk '{print $2}'`
+max_size=`grep ^max_size $CONFIG | awk '{print $2}'`
+warc_naming=`grep ^WARC_naming $CONFIG | awk '{print $2}'`
 block_delay=`grep ^block_delay $CONFIG | awk '{print $2}'`
 max_block_count=`grep ^max_block_count $CONFIG | awk '{print $2}'`
 retry_delay=`grep ^retry_delay $CONFIG | awk '{print $2}'`
-warc_naming=`grep ^WARC_naming $CONFIG | awk '{print $2}'`
-collection_prefix=`grep ^collection_prefix $CONFIG | awk '{print $2}'`
+
+description=`grep ^description $CONFIG | awk '{print $2}'`
+operator=`grep ^operator $CONFIG | awk '{print $2}'`
+collections=`grep ^collection_ $CONFIG | awk '{print $2}' | tr "\n" ' '`
 title_prefix=`grep ^title_prefix $CONFIG | cut -d \" -f 2`
 creator=`grep ^creator $CONFIG | cut -d \" -f 2`
 sponsor=`grep ^sponsor $CONFIG | cut -d \" -f 2`
 scancenter=`grep ^scanningcenter $CONFIG | awk '{print $2}'`
-operator=`grep ^operator $CONFIG | awk '{print $2}'`
 
 # get IAS3 keys
 if [ -f $S3CFG ]
@@ -59,7 +63,7 @@ then
     exit 1
 elif [ -z $warc_naming ] || [ $warc_naming -gt 2 ]
 then
-    echo "ERROR: invalid crawl operator: $operator"
+    echo "ERROR: invalid warc_naming: $warc_naming"
     exit 1
 elif [ -z $block_delay ] || [ ! `echo $block_delay | grep [[:digit:]]` ]
 then
@@ -67,19 +71,23 @@ then
     exit 1
 elif [ -z $retry_delay ] || [ ! `echo $retry_delay | grep [[:digit:]]` ]
 then
-    echo "ERROR: invalud retry_delay: $retry_delay"
+    echo "ERROR: invalid retry_delay: $retry_delay"
     exit 1
 elif [ -z $max_block_count ] || [ ! `echo $max_block_count | grep [[:digit:]]` ]
 then
-    echo "ERROR: invalud max_block_count: $max_block_count"
+    echo "ERROR: invalid max_block_count: $max_block_count"
+    exit 1
+elif [ -z $description ] || [ `echo $description | grep '{describe_effort}'` ]
+then
+    echo "ERROR: invalid description: $description"
     exit 1
 elif [ -z $operator ] || [ $operator == "tbd@archive.org" ]
 then
     echo "ERROR: invalid crawl operator: $operator"
     exit 1
-elif [ -z $collection_prefix ] || [ $collection_prefix == 'TBD' ]
+elif [ -z "$collections" ] || [ `echo $collections | grep -c 'TBD'` -ne 0 ]
 then
-    echo "ERROR: invalid collection_prefix: $collection_prefix"
+    echo "ERROR: invalid collection(s): $collections"
     exit 1
 elif [ -z "$title_prefix" ] || [ "$title_prefix" == 'TBD Crawldata' ]
 then
@@ -99,21 +107,21 @@ then
     exit 1
 else
     echo "config OK!"
-    echo "  job_dir           = $job_dir"
-    echo "  xfer_dir          = $xfer_dir"
-    echo "  DRAINME           = $DRAINME"
-    echo "  max_size          = $max_size"
-    echo "  sleep_time        = $sleep_time"
-    echo "  block_delay       = $block_delay"
-    echo "  max_block_count   = $max_block_count"
-    echo "  retry_delay       = $retry_delay"
-    echo "  collection_prefix = $collection_prefix"
-    echo "  title_prefix      = $title_prefix"
-    echo "  creator           = $creator"
-    echo "  sponsor           = $sponsor"
-    echo "  scanningcenter    = $scancenter"
-    echo "  operator          = $operator"
-    echo "  access_key        = $access_key"
-    echo "  secret_key        = $secret_key"
+    echo "  job_dir          = $job_dir"
+    echo "  xfer_dir         = $xfer_dir"
+    echo "  DRAINME          = $DRAINME"
+    echo "  max_size         = $max_size"
+    echo "  sleep_time       = $sleep_time"
+    echo "  block_delay      = $block_delay"
+    echo "  max_block_count  = $max_block_count"
+    echo "  retry_delay      = $retry_delay"
+    echo "  collection(s)    = $collections"
+    echo "  title_prefix     = $title_prefix"
+    echo "  creator          = $creator"
+    echo "  sponsor          = $sponsor"
+    echo "  scanningcenter   = $scancenter"
+    echo "  operator         = $operator"
+    echo "  access_key       = $access_key"
+    echo "  secret_key       = $secret_key"
     exit 0
 fi

@@ -57,20 +57,14 @@ function query_user {
   fi
 }
 
-function set_t14 { # 14-digit timestamp
-    t14=`echo ${t:0:4}-${t:4:2}-${t:6:2} ${t:8:2}:${t:10:2}:${t:12:2}`
-}
-
 function set_tHR { # human-readable date format
-    format_date='date "+%T %b%e %G" -d "`echo ${t14}`"'
-    # eg '20:13:02 Sep 1 2010'
-    tHR=`eval $format_date`
+    tHR=`date -d "${t:0:4}-${t:4:2}-${t:6:2} ${t:8:2}:${t:10:2}:${t:12:2}"`
 }
 
 # ISO 8601 date format
 function set_tISO {
-    # sort of hard-coded, could use date +%Y-%m-%dT%H:%M:%S%Z -d blah
-    tISO=`echo ${t:0:4}-${t:4:2}-${t:6:2}T${t:8:2}:${t:10:2}:${t:12:2}Z`
+    # tISO=`echo ${t:0:4}-${t:4:2}-${t:6:2}T${t:8:2}:${t:10:2}:${t:12:2}Z`
+    tISO=`date +%Y-%m-%dT%T%Z -d "${t:0:4}-${t:4:2}-${t:6:2} ${t:8:2}:${t:10:2}:${t:12:2}"`
 }
 
 # we could do something more sophisticated here
@@ -81,30 +75,44 @@ function set_date_range {
     t=`echo $files[0]\
       | cut -d '-' -f 2\
       | grep -o "[0-9]\{17\}"`
+    first_file_date=$t
     set_tISO
-    start=${tISO}
+    start_date_ISO=${tISO}
+    set_tHR
+    start_date_HR=${tHR}
+
     scandate=${t:0:14}
     metadate=${t:0:4}
-    first_date=$t
-
-    # get warc end date
+    
+    # get dates from last file in series
     if [ ${#files[@]} -gt 1 ]
     then
+        last_file="${files[@]:$((${#files[@]}-1))}"
         t=`echo "${files[@]:$((${#files[@]}-1))}"\
             | tr '/' ' '\
             | awk '{print $NF}'\
             | cut -d '-' -f 2\
             | grep -o "[0-9]\{17\}"`
+        last_file_date=$t
+        # warc end date (from last file mtime). should (closely) 
+        # correspond to time of last record in series
+        t=`stat --format=%y "$last_file"\
+          | cut -d '.' -f 1\
+          | tr  -d '-'\
+          | tr  -d ' '\
+          | tr  -d ':'`
+        last_date=${t:0:14}
         set_tISO
-        end=${tISO}
-        last_date=$t
+        end_date_ISO=${tISO}
+        set_tHR
+        end_date_HR=${tHR}
     fi
 
-    if [ -z $end ]
+    if [ -z $end_date_ISO ]
     then
-        date_range=${start}
+        date_range=${start_date_ISO}
     else
-        date_range="${start} to ${end}"
+        date_range="${start_date_ISO} to ${end_date_ISO}"
     fi
 }
 
@@ -444,7 +452,7 @@ then
       secret_key=`grep secret_key $S3CFG | awk '{print $3}'`
 
       # parse config
-      collection_prefix=`grep ^collection_prefix $CONFIG | awk '{print $2}'`
+      # collection_prefix=`grep ^collection_prefix $CONFIG | awk '{print $2}'`
       title_prefix=`grep ^title_prefix $CONFIG | cut -d \" -f 2`
       test_suffix=`grep ^test_suffix $CONFIG | awk '{print $2}'`
       block_delay=`grep ^block_delay $CONFIG | awk '{print $2}'`
@@ -459,11 +467,9 @@ then
       bucket="${warc_series}${test_suffix}"
       mediatype='web'
       title="${title_prefix} ${date_range}"
-      collection1="${collection_prefix}_${cdate}"
-      collection2='webwidecrawl'
-      collection3='test_collection'
       subject='crawldata'
       derive=0
+
       num_warcs=${nfiles_manifest}
       size_hint=$(( $std_warc_size * $num_warcs )) # in gibibytes
       first_serial=`echo $warc_series | cut -d '-' -f 3`
@@ -475,6 +481,7 @@ then
       scanner=`hostname -f`
       creator=`grep ^creator $CONFIG | cut -d \" -f 2`
       sponsor=`grep ^sponsor $CONFIG | cut -d \" -f 2`
+      contributor=`grep ^contributor $CONFIG | cut -d \" -f 2`
       # scandate (using 14-digits of timestamp of first warc in series)
       # metadate (like books, the year)
       operator=`grep ^operator $CONFIG | awk '{print $2}'`
@@ -483,42 +490,63 @@ then
       crawler_version=`zcat ${files[0]} | head | grep software | awk '{print $2}'`
 
       # description => reports TBD
-      description="$crawler $crawljob $first_date $first_serial $last_serial $num_warcs $size_hint"
+      # description="$crawler $crawljob $first_file_date $first_serial $last_serial $num_warcs $size_hint"
+      description=`grep ^description $CONFIG\
+        | cut -d \" -f 2\
+        | sed -e s/CRAWLHOST/$scanner/\
+        | sed -e s/CRAWLJOB/$crawljob/\
+        | sed -e s/START_DATE/"$start_date_HR"/\
+        | sed -e s/END_DATE/"$end_date_HR"/`
+
+      # support multiple arbitrary collections
+      COLLECTIONS=''
+      coll_count=0
+      for c in `grep ^collection_ $CONFIG | awk '{print $2}' | tr "\n" ' '`
+      do
+          # --header 'x-archive-meta01-collection:${collection1}'\
+          # --header 'x-archive-meta02-collection:${collection2}'\
+          # --header 'x-archive-meta03-collection:${collection3}'\
+          collection[${coll_count}]=$c
+          ((coll_count++))
+          coll_serial=`printf "%02d" $coll_count`
+          COLLECTIONS="${COLLECTIONS} --header 'x-archive-meta${coll_serial}-collection:${c}'"
+      done
 
       # this breaks if CONIG is not fqpn
-      if [ -z $creator ] || [ -z $sponsor ] || [ -z $scancenter ] || [ -z $operator ]
+      if [ -z $creator ] || [ -z $sponsor ] || [ -z $scancenter ] ||\
+         [ -z $operator ] || [ -z $contributor ] || [ -z $description ]
       then
-          echo "ERROR some null metadata. must give fullpath to config." | tee -a $OPEN
+          echo "ERROR some null metadata." | tee -a $OPEN
           echo "Aborting." | tee -a $OPEN
           exit 1          
       fi
 
-      echo "metadata:"
-      echo "  mediatype    = $mediatype   "
-      echo "  title        = $title       "
-      echo "  description  = $description "
-      echo "  collection1  = $collection1 "
-      echo "  collection2  = $collection2 "
-      echo "  collection3  = $collection3 "
-      echo "  subject      = $subject     "
-
-      echo "    scanner        = '${scanner}'"
-      echo "    creator        = '${creator}'"
-      echo "    scandate       = '${scandate}'"
-      echo "    date           = '${metadate}'"
-      echo "    sponsor        = '${sponsor}'"
-      echo "    scanningcenter = '${scancenter}'"
-      echo "    operator       = '${operator}'"
-      echo "    id...-access   = '${access}'"
-      echo "    crawler        = ${crawler_version}"
-
-      echo "  crawjob      = $crawljob"
-      echo "  num_warcs    = $num_warcs"
-      echo "  size_hint    = $size_hint"
-      echo "  first_serial = $first_serial"
-      echo "  first_date   = $first_date"
-      echo "  last_serial  = $last_serial"
-      echo "  last_date    = $last_date"
+      echo "[item metadata]"
+      echo "  mediatype     = $mediatype"
+      echo "  title         = $title"
+      echo "  description   = $description"
+      echo "  collection(s) = ${collection[@]}"
+      echo "  subject       = $subject"
+      echo "[books metadata]"
+      echo "  scanningcenter = '${scancenter}'"
+      echo "  scandate       = '${scandate}'"
+      echo "  scanner        = '${scanner}'"
+      echo "  date           = '${metadate}'"
+      echo "  creator        = '${creator}'"
+      echo "  sponsor        = '${sponsor}'"
+      echo "  contributor    = '${contributor}'"
+      echo "  operator       = '${operator}'"
+      echo "  id...-access   = '${access}'"
+      echo "[crawl metadata]"
+      echo "  crawler         = ${crawler_version}"
+      echo "  crawljob        = $crawljob"
+      echo "  numwarcs        = $num_warcs"
+      echo "  sizehint        = $size_hint"
+      echo "  firstfileserial = $first_serial"
+      echo "  firstfiledate   = $first_file_date"
+      echo "  lastfileserial  = $last_serial"
+      echo "  lastfiledate    = $last_file_date"
+      echo "  lastdate        = $last_date"
 
       echo "Creating item: http://archive.org/details/${bucket}" | tee -a $OPEN
 
@@ -534,9 +562,7 @@ then
        --header 'x-archive-size-hint:${size_hint}'\
        --header \"authorization: LOW ${access_key}:${secret_key}\"\
        --header 'x-archive-meta-mediatype:${mediatype}'\
-       --header 'x-archive-meta01-collection:${collection1}'\
-       --header 'x-archive-meta02-collection:${collection2}'\
-       --header 'x-archive-meta03-collection:${collection3}'\
+       $COLLECTIONS\
        --header \"x-archive-meta-title:${title}\"\
        --header \"x-archive-meta-description:${description}\"\
        --header 'x-archive-meta-subject:${subject}'\
@@ -545,17 +571,19 @@ then
        --header 'x-archive-meta-scandate:${scandate}'\
        --header 'x-archive-meta-date:${metadate}'\
        --header \"x-archive-meta-sponsor:${sponsor}\"\
+       --header \"x-archive-meta-contributor:${contributor}\"\
        --header 'x-archive-meta-scanningcenter:${scancenter}'\
        --header 'x-archive-meta-operator:${operator}'\
        --header 'x-archive-meta-identifier-access:${access}'\
        --header 'x-archive-meta-crawler:${crawler_version}'\
        --header 'x-archive-meta-crawljob:${crawljob}'\
-       --header 'x-archive-meta-num--warcs:${num_warcs}'\
-       --header 'x-archive-meta-size--hint:${size_hint}'\
-       --header 'x-archive-meta-first--serial:${first_serial}'\
-       --header 'x-archive-meta-first--date:${first_date}'\
-       --header 'x-archive-meta-last--serial:${last_serial}'\
-       --header 'x-archive-meta-last--date:${last_date}'\
+       --header 'x-archive-meta-numwarcs:${num_warcs}'\
+       --header 'x-archive-meta-sizehint:${size_hint}'\
+       --header 'x-archive-meta-firstfileserial:${first_serial}'\
+       --header 'x-archive-meta-firstfiledate:${first_file_date}'\
+       --header 'x-archive-meta-lastfileserial:${last_serial}'\
+       --header 'x-archive-meta-lastfiledate:${last_file_date}'\
+       --header 'x-archive-meta-lastdate:${last_date}'\
        --write-out '%{http_code} %{size_upload} %{time_total}'\
        --upload-file ${filepath}"
       retry_count=0
@@ -588,6 +616,7 @@ then
       do
           filepath=${files[$i]}
           filename=`echo $filepath | grep -o "[^/]*$"`
+          checksum=`grep $filename $MANIFEST | awk '{print $1}'`
           download="http://${dl}/${bucket}/${filename}"
           tombstone="${filepath}.tombstone"
           retry_count=0
@@ -599,6 +628,7 @@ then
               echo "["$((${i}+1))"/${#files[@]}]: ${filename}" | tee -a $OPEN
               copts="--include --location\
                      --header \"authorization: LOW ${access_key}:${secret_key}\"\
+                     --header \"Content-MD5: ${checksum}\"\
                      --header 'x-archive-queue-derive:${derive}'\
                      --write-out '%{http_code} %{size_upload} %{time_total}'\
                      --upload-file ${filepath}"
@@ -649,6 +679,7 @@ then
     unset TASK
     unset ERROR
     unset SUCCESS
+    unset COLLECTIONS
 
   done
 
