@@ -1,0 +1,23 @@
+2010-10-28
+----
+r37 | steve | 2010-10-28 00:45:05 UTC
+* deprecated (non-functional) thumper mode, 
+* renamed s3-dtmon.sh to dtmon.sh (#661451), 
+* check gzip before upload (#661519), 
+* fixed variable test syntax error (#664027), 
+* removed crawljob "incoming" dependency (#664707), 
+* use collection 3/2/1 syntax in config (#664825), 
+* fixed blocking inconsistent state (#666607), 
+* check required description keywords (#667021), 
+* TODO file deleted in favor of Launchpad
+
+2010-10-04
+----
+r36 | steve | 2010-10-05 00:31:22 UTC
+* added contributor, lastdate. 
+* use actual date of last capture for title, description, lastdate. 
+* rich description with keywords. 
+* send Content-MD5. 
+* default retry delay 86400 seconds (24hrs). 
+* support any number of arbitrary collections.
+
