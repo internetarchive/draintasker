@@ -12,6 +12,7 @@
 #   job_dir      /{0,1,2,3}/crawling/{crawljob}/warcs
 #   xfer_dir     /{0,1,2,3}/incoming/{crawljob}
 #   max_size     max size in GB of warcs to be transferred
+#   warc_naming  integer for supported WARC naming (see drain.cfg)
 #   [force]      1 = do not query user
 #   [mode]       single = pack only 1 series and exit
 #
@@ -69,6 +70,15 @@ function set_warc_series_2 {
   warc_series="${prefix}-${timestamp}-${first_serial}"
 }
 
+function report_done {
+    echo "$total_num_warcs warcs"\
+         "$gz_OK_count gz_OK"\
+         "$valid_count validated"\
+         "$pack_count packed"\
+         "$series_count series"
+    echo `basename $0` "Done." `date`
+}
+
 ################################################################
 
 if [ -n "$4" ]
@@ -84,7 +94,7 @@ then
   if [ -z $force ]; then force=0; fi
   if [ -z $mode  ]; then mode=0;  fi
 
-  echo $0 `date`
+  echo `basename $0` `date`
 
   if [ ! -d $job_dir ]
   then
@@ -132,7 +142,7 @@ then
   echo "  PACKED           = $PACKED"
   echo "  mode             = $mode"
 
-  if [ $force == 0 ]; then query_user; fi
+  if [ $force -ne 1 ]; then query_user; fi
 
   # look for DRAINME
   if [ ! -e $DRAINME ]
@@ -158,6 +168,7 @@ then
   series_count=0
   pack_count=0
   valid_count=0
+  gz_OK_count=0
   msize=0    # manifest size
   mcount=0   # manifest file count
   mfiles=()  # manifest files array
@@ -165,8 +176,31 @@ then
   # loop over warcs in job dir
   back=`pwd`
   cd $job_dir
-  for w in `find $job_dir -maxdepth 1 \( -name \*.arc.gz -o -name \*.warc.gz \) | sort`
+  for w in `find $job_dir\
+      -maxdepth 1 \( -name \*.arc.gz -o -name \*.warc.gz \)\
+      | sort`
   do 
+
+    # check gzip container
+    echo "  verifying gz: $w"
+    # zcat $w > /dev/null
+    if [ $? != 0 ]
+    then
+        echo "ERROR: bad gzip, skipping file: $w"
+        echo "  mv $w $w.bad"
+        continue
+    fi
+    ((gz_OK_count++))
+
+    # validate WARC - TBD
+    # echo "  validating WARC: $w"
+    # $warcvalidator -f $w
+    # if [ $? != 0 ]; then
+    #   err="ERROR: invalid warc: ${mfiles[${i}]} $?"
+    #   echo "  mv $w ${w}.invalid"
+    #   continue
+    # fi
+    # ((valid_count++))
 
     # increment msize
     f=`echo $w | tr "/" " " | awk '{print $NF}'`
@@ -199,8 +233,6 @@ then
       if [ "$is_last_warc" == 'true' ] 
       then
         last_warc_count=$(($mcount + 1))
-        echo "mfiles[${mcount}] ${mfiles[${mcount}]}"\
-             "$warc_series $fsize $msize"
         if [ -e $FINISH_DRAIN ]
         then
           echo "FINISH_DRAIN file found, packing last warcs"\
@@ -232,12 +264,18 @@ then
       fi 
       xfer_dir="$xfer_home/${warc_series}"
 
+      echo "files considered for packing:" 
+      count=0
+      for ((i=0; i<${#mfiles[@]}; i++))
+      do
+          printf "%5s %s\n" [$i] ${mfiles[$i]}
+      done
+
 echo
 echo "WARNING: WARC naming may have changed, check series: $warc_series"
+echo
 
-      echo " "
       echo "==== $pack_info  ====  "
-      echo " "
 
       # make xfer_home
       if [ -d $xfer_home ]; then
@@ -263,20 +301,6 @@ echo "WARNING: WARC naming may have changed, check series: $warc_series"
 	fi
       fi
 
-      # validate files in this manifest
-      for (( i=0;i<$num_mfiles;i++)); do
-	echo "VALIDATION DISABLED ${mfiles[${i}]}"
-        # echo "validating ${mfiles[${i}]}"
-        # $warcvalidator -f ${mfiles[${i}]}
-	# if [ $? != 0 ]; then
-	#   err="ERROR: warc validation failed: ${mfiles[${i}]} $?"
-	#   echo $err > $ERROR
-	#   exit 2
-	# else
-	#   ((valid_count++))  
-	# fi
-      done       
-
       # move files in this manifest
       for (( i=0;i<$num_mfiles;i++)); do
         echo "mv ${mfiles[${i}]} $xfer_dir"
@@ -291,15 +315,14 @@ echo "WARNING: WARC naming may have changed, check series: $warc_series"
 
       # leave PACKED file
       echo "echo '$pack_info' > $xfer_dir/PACKED"
-      # echo $pack_info > $xfer_dir/PACKED
 
       # check mode
       if [ $mode == 'single' ]
       then
-        echo "$total_num_warcs warcs $pack_count packed $series_count series"
-        echo "mode = $mode, exiting normally."
 	echo "removing OPEN file: $open"
         # rm $open  # unlock this process
+        echo "mode = $mode, exiting normally."
+        report_done
         exit 0
       fi
 
@@ -320,12 +343,6 @@ echo "WARNING: WARC naming may have changed, check series: $warc_series"
       last_serial=''
       xfer_dir=''
 
-    fi
-
-    if [ "$is_last_warc" != 'true' ]
-    then
-      echo "mfiles[${mcount}] ${mfiles[${mcount}]}"\
-           "$warc_series $fsize $msize"
     fi
 
     ((mcount++))
@@ -349,6 +366,4 @@ else
   exit 1
 fi
 
-echo "$total_num_warcs warcs $valid_count validated $pack_count"\
-     "packed $series_count series"
-echo "$0 Done." `date`
+report_done

@@ -1,23 +1,25 @@
 DRAINTASKER - clears filling disks
 ================================================================
+
+* Draintasker wiki:
+  https://webarchive.jira.com/wiki/display/WEBOPS/Draintasker
+* Draintasker bugs:
+  https://launchpad.net/archivewidecrawl/+bugs
+
 supports "draining" a running crawler along two paths:
 
-  1) dtmon: catalog-direct-to-thumpers (Santa Clara MD)
-  2) s3-dtmon: IAS3-to-petabox (paired storage)
-
-Draintasker JIRA wiki:
-https://webarchive.jira.com/wiki/display/WEBOPS/Draintasker
+  1) dtmon: IAS3-to-petabox (paired storage)
+  2) th-dtmon: catalog-direct-to-thumpers (Santa Clara MD)
 
 run like this:
 
   $ ssh home
   $ screen
   $ ssh -A crawler
-  $ cd /home/user/sw/draintasker
+  $ cd /path/draintasker
   $ svn up
-  $ emacs dtmon.cfg, save-as: crawljob-drain-n.cfg
-  $ s3-dtmon.sh crawljob-drain-n.cfg\
-    | tee -a /1/crawling/crawljob/logs/drain-n.log
+  $ emacs dtmon.cfg, save-as: /path/drain.cfg
+  $ dtmon.sh /path/drain.cfg | tee -a /path/drain.log
 
 PROCESSING 
 
@@ -28,7 +30,7 @@ PROCESSING
 
 under-the-hood:
 
-  s3-dtmon.sh config
+  dtmon.sh config
   |
   '-> s3-drain-job job_dir xfer_job_dir max_size warc_naming
      |
@@ -37,7 +39,7 @@ under-the-hood:
      '-> s3-launch-transfers.sh    => LAUNCH TASK [RETRY] SUCCESS TOMBSTONE
      '-> delete-verified-warcs.sh  => poof, no w/arcs!
   
-  dtmon.sh config
+  th-dtmon.sh config
   |
   '-> drain-job job_dir xfer_job_dir thumper max_size warc_naming
       |
@@ -60,12 +62,16 @@ some advice:
   3) check the status of your disks
      ./get-status.sh
   4) (optional) test petabox-to-thumper path on single series
-     ./launch-transfers.sh
+     ./launch-transfers.sh 
   5) log into home and open a screen session
-  6) in screen, ssh crawler, cd /0/crawling/draintasker/, svn up
-  7) run dtmon.sh or s3-dtmon.sh to continuously drain each job+disk
-     s3-dtmon.sh crawljob-disk1.cfg
-     s3-dtmon.sh crawljob-disk3.cfg
+  6) in screen, ssh crawler, cd /path/draintasker/, svn up
+  7) run dtmon.sh to continuously drain each job+disk
+     [screen]
+       cd /path/draintasker
+       ./dtmon.sh /path/disk1.cfg
+     [screen]
+       cd /path/draintasker
+       ./dtmon.sh /path/disk3.cfg
 
 CONFIGURATION
 
@@ -89,10 +95,10 @@ and be "packed" into
     
 DEPENDENCIES
 
-  s3-dtmon.sh (IAS3-to-petabox)
-    + HOME/.ias3cfg (when using s3-dtomon.sh)
+  dtmon.sh (IAS3-to-petabox)
+    + HOME/.ias3cfg (when using dtmon.sh)
     + add [incoming_x] stanzas to /etc/rsyncd.conf (see wiki)
-  dtmon.sh (catalog-direct-to-thumper)
+  th-dtmon.sh (catalog-direct-to-thumper)
     + ~/.wgetrc with your archive.org user cookies (see wiki)
     + ensure user petabox user exists: /home-local/petabox
     + PETABOX_HOME=/home/user/petabox (codebase from svn)
@@ -121,23 +127,23 @@ human readable form of that time with the date cmd, like so:
 
 DRAIN DAEMON
 
-  s3-dtmon.sh                run s3-drain-job periodically
-  dtmon.sh                   run drain-job periodically
-  drain-job.sh               run draintasker processes in single mode
+  dtmon.sh      run s3-drain-job periodically
+  th-dtmon.sh   run drain-job periodically
+  drain-job.sh  run draintasker processes in single mode
 
 DRAIN PROCESSING
 
-  delete-verified-warcs.sh   delete original (verified) w/arcs from each series 
-  get-remote-warc-urls.sh    report remote md5 and url for all filesxml in series 
-  item-submit-task.sh        submit catalog task for series
-  item-verify-download.sh    wget remote w/arc and verify checksum for series 
-  item-verify-size.sh        verify remote size of w/arc series
-  launch-transfers.sh        submit transfer tasks for series
-  make-manifests.sh          compute md5s into series MANIFEST
-  pack-warcs.sh              create warc series when available
-  s3-launch-transfers.sh     invoke curl for series
-  task-check-success.sh      check and report task success by task_id
-  verify-transfers.sh        run task-check-success and item-verify for series 
+  delete-verified-warcs.sh  delete original (verified) w/arcs from each series 
+  get-remote-warc-urls.sh   report remote md5 and url for all filesxml in series 
+  item-submit-task.sh       submit catalog task for series
+  item-verify-download.sh   wget remote w/arc and verify checksum for series 
+  item-verify-size.sh       verify remote size of w/arc series
+  launch-transfers.sh       submit transfer tasks for series
+  make-manifests.sh         compute md5s into series MANIFEST
+  pack-warcs.sh             create warc series when available
+  s3-launch-transfers.sh    invoke curl for series
+  task-check-success.sh     check and report task success by task_id
+  verify-transfers.sh       run task-check-success and item-verify for series 
 
 UTILS
 
@@ -150,7 +156,7 @@ UTILS
   copy-crawldata.sh          copy all crawldata preserving dir structure 
   make-and-store-bundle.sh   make bundles and scp to staging
 
-THUMPER
+THUMPER (NON-FUNCTIONAL-DEPRECATED)
 
   should be up-to-date in dtmon.cfg:
 

@@ -15,6 +15,8 @@
 #
 # siznax 2009
 
+usage="xfer_job_dir [force]"
+
 function query_user {
   echo "Continue [Y/n]> "
   read text
@@ -28,7 +30,7 @@ function query_user {
 if [ -n "$1" ]
 then
 
-  echo $0 `date`
+  echo `basename $0` `date`
 
   xfer_job_dir=$1
   total_rm_count=0
@@ -54,7 +56,7 @@ then
     if [ -e $TOMBSTONE ]
     then
   
-      echo "found TOMBSTONE: $TOMBSTONE"
+      echo "TOMBSTONE exists: $TOMBSTONE"
   
       tombstone_count=`wc -l $TOMBSTONE | awk '{print $1}'`
       manifest_count=`wc -l $MANIFEST | awk '{print $1}'`
@@ -62,13 +64,19 @@ then
       # check manifest, tombstone count
       if [ ! $tombstone_count -eq $manifest_count ]
       then
-        echo "ERROR: count mis-match: ($tombstone_count) tombstone ($manifest_count) manifest in series: $warc_series"
+        echo "ERROR: count mis-match:"\
+             "($tombstone_count) tombstone"\
+             "($manifest_count) manifest"\
+             "in series: $warc_series"
         exit 2
       fi
   
-      echo "found ($warc_count) warcs in: $d"
-  
-      if [ $warc_count == 0 ]; then continue; fi
+      if [ $warc_count == 0 ]
+      then 
+        continue
+      else
+        echo "found ($warc_count) warcs in: $d"
+      fi
   
       echo "  tombstone_count: $tombstone_count"
       echo "  manifest_count: $manifest_count"
@@ -116,9 +124,10 @@ then
     warc_count=0
   done
 else
-  echo "$0 xfer_job_dir [force]"
+  echo "Usage:" `basename $0` $usage
   exit 1
 fi
 
 echo "removed ($total_rm_count) original warcs total"
-echo $0 "Done." `date`
+
+echo `basename $0` "done." `date`

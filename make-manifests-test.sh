@@ -1,5 +1,6 @@
 #!/bin/bash 
-# make-manifests.sh xfer_job_dir [mode]
+#
+# make-manifests-test.sh xfer_job_dir [mode]
 #
 # foreach PACKED file in xfer_job_dir, computes md5sum of 
 # W/ARCs into MANIFEST file if not extant
@@ -13,7 +14,12 @@
 #
 # siznax 2009
 
-usage="$0 xfer_job_dir [mode=single]"
+usage="xfer_job_dir [mode]"
+
+function report_done {
+    echo "$warc_count warcs $manifest_count manifests"
+    echo `basename $0` "done." `date`
+}
 
 packed_count=0
 warc_count=0
@@ -29,7 +35,7 @@ then
     mode=0
   fi
 
-  echo $0 `date`
+  echo `basename $0` `date`
 
   back=`pwd`
   cd $1
@@ -57,11 +63,9 @@ then
         continue
       fi
 
-      echo " "
       echo "==== $warc_series/MANIFEST ===="
       echo "OPEN    :  $open"
       echo "MANIFEST:  $MANIFEST"
-      echo " "
       
       # touch $open
       if [ $? != 0 ]; then
@@ -73,7 +77,7 @@ then
 
         (( warc_count++ ))
 
-        echo "md5sum $f >> OPEN"
+        echo "  md5sum $f >> OPEN"
         # md5sum $f >> $open
         if [ $? != 0 ]
         then
@@ -95,8 +99,8 @@ then
       # check mode
       if [ $mode == 'single' ]
       then
-        echo "$warc_count warcs $manifest_count manifests"
         echo "mode = $mode, exiting normally."
+	report_done
         exit 0
       fi
 
@@ -110,9 +114,8 @@ then
   cd $back
 
 else
-  echo $usage
+  echo "Usage:" `basename $0` $usage
   exit 1  
 fi
 
-echo "$warc_count warcs $manifest_count manifests"
-echo $0 "Done." `date`
+report_done

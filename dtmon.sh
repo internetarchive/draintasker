@@ -9,41 +9,56 @@
 # run like this: 
 #
 #   $ screen 
-#   $ ./dtmon.sh config | tee -a log_file
+#   $ /home/user/dt/dtmon.sh config | tee -a log_file
 #
 # PREREQUISITES
 #
 #   DRAINME  {job_dir}/DRAINME
 #
+# DEPENDENCIES
+#
+#   ~/.ias3cfg  put your keys here, see abouts3
+#
 # CONFIGURATION PARAMS
 #
-#   job_dir     /{0,1,2,3}/crawling/{crawljob}/warcs
-#   xfer_dir    /{0,1,2,3}/incoming/{crawljob}
+#   job_dir     /{crawldata}/{job_name}
+#   xfer_dir    /{rsync_path}/{job_name}
+#   max_size    max size in GB of warcs to be transferred
 #   sleep_time  seconds to sleep between checks for DRAINME file
-#   thumper     destination storage node
 #
-# siznax 2009
+# PREREQUISITES
+#
+#   DRAINME  {job_dir}/DRAINME
+#
+# SEE ALSO
+#
+#   http://archive.org/help/abouts3.txt
+#
+# siznax 2010
 
-MAX_ITEM_SIZE_GB=10
-
-usage="$0 config"
+usage="config"
 
 if [ -n "$1" ]
 then
 
   CONFIG=$1
+  S3CFG="$HOME/.ias3cfg"
 
-  if [ -f $CONFIG ]
+  if [ ! -f $CONFIG ]
   then
+      echo "ERROR: config file not found: $CONFIG"
+      exit 1
+  elif [ ${CONFIG:0:1} != '/' ]
+  then
+      echo "ERROR: must give fullpath for config: $CONFIG"
+      exit 1
+  else
       job_dir=`grep ^job_dir $CONFIG | awk '{print $2}'`
       DRAINME="$job_dir/DRAINME"
       sleep_time=`grep ^sleep_time $CONFIG | awk '{print $2}'`
-  else
-      echo "ERROR: config file not found: $CONFIG"
-      exit 1
   fi
 
-  echo $0 `date`
+  echo `basename $0` `date`
 
   while [ 1 ]
   do
@@ -51,46 +66,24 @@ then
     if [ -e $DRAINME ]
     then
 
-        # update config
-        xfer_dir=`grep ^xfer_dir $CONFIG | awk '{print $2}'`
-        thumper=`grep ^thumper $CONFIG | awk '{print $2}'`
-        max_size=`grep ^max_size $CONFIG | awk '{print $2}'`
-        warc_naming=`grep ^WARC_naming $CONFIG | awk '{print $2}'`
-        sleep_time=`grep ^sleep_time $CONFIG | awk '{print $2}'`
+        ./s3-validate-config.sh $CONFIG $S3CFG
         
-        # check config
-        if [ ! -d $xfer_dir ]
+        if [ $? == 0 ]
         then
-            echo "ERROR: invalid xfer_dir: $xfer_dir"
-            exit 1
-        elif [ -z $max_size ] || [ $max_size -lt 1 ] || [ $max_size -gt $MAX_ITEM_SIZE_GB ] 
-        then
-            echo "ERROR: invalid max_size: $max_size"
-            exit 1
-        elif [ -z $sleep_time ]
-        then
-            echo "ERROR: null sleep_time, aborting."
-            exit 1
-        elif [ -z $thumper ] || [ $thumper == 'TBD' ]
-        then
-            echo "ERROR: invalid thumper: $thumper"
-            exit 1
+            xfer_dir=`grep ^xfer_dir $CONFIG | awk '{print $2}'`
+            max_size=`grep ^max_size $CONFIG | awk '{print $2}'`
+            sleep_time=`grep ^sleep_time $CONFIG | awk '{print $2}'`
+            warc_naming=`grep ^WARC_naming $CONFIG | awk '{print $2}'`
         else
-            echo "config OK!"
-            echo "  job_dir     = $job_dir"
-            echo "  xfer_dir    = $xfer_dir"
-            echo "  max_size    = $max_size"
-            echo "  sleep_time  = $sleep_time"
-            echo "  thumper     = $thumper"
-            echo "  warc_naming = $warc_naming"
-            echo "  DRAINME     = $DRAINME"
+            echo "ERROR: invalid config: $CONFIG"
+            exit 1
         fi
         
         # echo "Aborting."
         # exit 99
-
-        echo "drain-job.sh $job_dir $xfer_dir $thumper $max_size $warc_naming"
-        ./drain-job.sh $job_dir $xfer_dir $thumper $max_size $warc_naming
+        
+        echo "s3-drain-job.sh $job_dir $xfer_dir $max_size $warc_naming"
+        ./s3-drain-job.sh $job_dir $xfer_dir $max_size $warc_naming $CONFIG
 
     else
 
@@ -105,8 +98,8 @@ then
   done
 
 else
-  echo $usage
+  echo "Usage:" `basename $0` $usage
   exit 1
 fi
 
-echo $0 "Done." `date`
+echo `basename $0` "done." `date`

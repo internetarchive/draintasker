@@ -17,7 +17,7 @@
 #
 # siznax 2010
 
-usage="$0 job_dir xfer_job_dir max_size warc_naming config"
+usage="job_dir xfer_job_dir max_size warc_naming config"
 
 if [ -n "$5" ]
 then
@@ -28,7 +28,7 @@ then
   warc_naming=$4
   CONFIG=$5
 
-  echo $0 `date`
+  echo `basename $0` `date`
 
   if [ -e $job_dir ] 
   then
@@ -76,7 +76,7 @@ then
     exit 1
   fi
 else
-  echo $usage
+  echo "Usage: " `basename $0` $usage
   exit 1
 fi
-echo $0 "Done." `date`
+echo `basename $0` "done." `date`

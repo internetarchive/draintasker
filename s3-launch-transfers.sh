@@ -38,7 +38,8 @@
 #
 # siznax 2010
 
-usage="$0 config [force] [mode=single]"
+DT_HOME="."
+usage="config [force] [mode=single]"
 
 TEST='false'
 s3='s3.us.archive.org'
@@ -287,7 +288,7 @@ then
   if [ -z $force ]; then force=0; fi
   if [ -z $mode  ]; then mode=0;  fi
 
-  echo $0 `date`
+  echo `basename $0` `date`
 
   CONFIG=$1
   S3CFG=$HOME/.ias3cfg
@@ -301,6 +302,12 @@ then
       echo "ERROR: must give fullpath for config: $CONFIG"
       exit 1
   else
+      $DT_HOME/s3-validate-config.sh $CONFIG $HOME/.ias3cfg
+      if [ $? != 0 ]
+      then
+          echo "ERROR: invalid config: $CONFIG"
+          exit 1
+      fi
       xfer_job_dir=`grep ^xfer_dir $CONFIG | awk '{print $2}'`
   fi
 
@@ -325,7 +332,7 @@ then
 
       warc_series=`echo $d | egrep -o '/([^/]*)$' | tr -d "/"`
       crawler=`echo $warc_series | tr '-' ' ' | awk '{print $NF}'`
-      crawljob=`echo $d | grep -o incoming/[^/]* | cut -d '/' -f 2`
+      crawljob=`grep ^crawljob $CONFIG | awk '{print $2}'`
       crawldata="$d"
 
       # handle (5xx) RETRY file
@@ -374,7 +381,7 @@ then
           lock_file=${locking_files[$l]}
           if [ -e $lock_file ]
           then
-              echo "  $lock file exists: $lock_file"
+              echo "$lock file exists: $lock_file"
               continue 2
           fi
       done
@@ -399,6 +406,7 @@ then
       echo "parsing MANIFEST:" | tee -a $OPEN
       echo "  $MANIFEST" | tee -a $OPEN
       num_warcs=0
+      unset files
       for warc in `cat $MANIFEST | tr -s ' ' | cut -d ' ' -f 2`
       do
           file="${d}/${warc}"
@@ -425,8 +433,8 @@ then
       if [ ${nfiles_manifest} -ne ${nfiles_found} ]
       then
           echo "ERROR: count mis-match:"\
-               " nfiles_manifest=${nfiles_manifest} vs "\
-               " nfiles_found=${nfiles_found}"\
+               "nfiles_manifest=${nfiles_manifest} vs"\
+               "nfiles_found=${nfiles_found}"\
                | tee -a $OPEN
           echo "Aborting!" | tee -a $OPEN
           cp $OPEN $ERROR
@@ -440,7 +448,6 @@ then
       secret_key=`grep secret_key $S3CFG | awk '{print $3}'`
 
       # parse config
-      # collection_prefix=`grep ^collection_prefix $CONFIG | awk '{print $2}'`
       title_prefix=`grep ^title_prefix $CONFIG | cut -d \" -f 2`
       test_suffix=`grep ^test_suffix $CONFIG | awk '{print $2}'`
       block_delay=`grep ^block_delay $CONFIG | awk '{print $2}'`
@@ -482,27 +489,32 @@ then
       description=`grep ^description $CONFIG\
         | cut -d \" -f 2\
         | sed -e s/CRAWLHOST/$scanner/\
-        | sed -e s/CRAWLJOB/$crawljob/\
-        | sed -e s/START_DATE/"$start_date_HR"/\
-        | sed -e s/END_DATE/"$end_date_HR"/`
+          -e s/CRAWLJOB/$crawljob/\
+          -e s/START_DATE/"$start_date_HR"/\
+          -e s/END_DATE/"$end_date_HR"/`
 
       # support multiple arbitrary collections
+      # webwidecrawl/collection/serial
+      #   => collection3 = webwidecrawl
+      #   => collection2 = collection
+      #   => collection1 = serial
       COLLECTIONS=''
-      coll_count=0
-      for c in `grep ^collection_ $CONFIG | awk '{print $2}' | tr "\n" ' '`
+      colls=`grep ^collections $CONFIG | awk '{print $2}' | tr '/' ' '` 
+      coll_count=`echo $colls | wc -w`
+      for c in $colls
       do
           # --header 'x-archive-meta01-collection:${collection1}'\
           # --header 'x-archive-meta02-collection:${collection2}'\
           # --header 'x-archive-meta03-collection:${collection3}'\
           collection[${coll_count}]=$c
-          ((coll_count++))
           coll_serial=`printf "%02d" $coll_count`
           COLLECTIONS="${COLLECTIONS} --header 'x-archive-meta${coll_serial}-collection:${c}'"
+          ((coll_count--))
       done
 
-      # this breaks if CONIG is not fqpn
-      if [ -z $creator ] || [ -z $sponsor ] || [ -z $scancenter ] ||\
-         [ -z $operator ] || [ -z $contributor ] || [ -z $description ]
+      # this breaks if CONFIG is not fqpn
+      if [ -z "$creator" ] || [ -z "$sponsor" ] || [ -z "$contributor" ] ||\
+         [ -z "$description" ] || [ -z $scancenter ] || [ -z $operator ] 
       then
           echo "ERROR some null metadata." | tee -a $OPEN
           echo "Aborting." | tee -a $OPEN
@@ -660,7 +672,6 @@ then
 
     fi # /if [ -e MANIFEST ]
 
-    unset files
     unset OPEN
     unset LAUNCH
     unset RETRY
@@ -672,12 +683,12 @@ then
   done
 
   echo "$launch_count buckets filled"
-  echo $0 "Done." `date`
+  echo `basename $0` "done." `date`
 
   cd $back
 
 else
-  echo $usage
+  echo "Usage: " `basename $0` $usage
   exit 1
 fi
 
