@@ -6,16 +6,20 @@ Usage: dtmon.py config [ copy ]
 """
 __author__ = "siznax 2010"
 
+# for man page, "pydoc dtmon"
+
 import sys, os
 
-# eventually, contained within ia_upldr module
+# to be contained within ia_upldr
 class upldr:
 
     def __init__(self,fname):
+        """ initialize configuration """
         self.name = os.path.basename(__file__)
         self.init_config(fname)
 
     def validate_config(self):
+        """ validate given config file """
         try:
             config.validate(self.config)
             print "config OK:", self.config_fname
@@ -33,17 +37,20 @@ class upldr:
             sys.exit("Error: ias3cfg file not found: "+self.ias3cfg)
         
     def init_config(self,fname):
+        """ initial config pass """
         self.config_fname = fname
         self.config = config.get_config(fname)
         self.validate_config()
         self.configure_instance()
 
     def update_config(self):
+        """ update config before each drain job """
         self.config = config.get_config(self.config_fname)
         self.validate_config()
         self.configure_instance()
 
     def drain_job(self):
+        """ call s3-drain-job.sh """
         import subprocess
         try:
             subprocess.check_call(["s3-drain-job.sh"])
@@ -52,6 +59,7 @@ class upldr:
             sys.exit()
 
     def process(self):
+        """ if DRAINME file exists, update config, drain job, sleep """
         import time
         utils.echo_start(self.name)
         while True:
