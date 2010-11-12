@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# s3-drain-job-s3.sh job_dir xfer_job_dir max_size warc_naming
+# s3-drain-job-s3.sh config
 #
 # run draintasker processes on a crawl job in single mode.
 # the idea here is to keep a crawl draining while not spending
@@ -17,16 +17,24 @@
 #
 # siznax 2010
 
-usage="job_dir xfer_job_dir max_size warc_naming config"
+usage="config"
 
-if [ -n "$5" ]
+if [ -f "$1" ]
 then
 
-  job_dir=$1
-  xfer_job_dir=$2
-  max_size=$3
-  warc_naming=$4
-  CONFIG=$5
+  CONFIG=$1
+  job_dir=`config.py $CONFIG job_dir`
+  xfer_job_dir=`config.py $CONFIG xfer_dir`
+  max_size=`config.py $CONFIG max_size`
+  warc_naming=`config.py $CONFIG WARC_naming`
+
+  # DEBUG
+  # echo "CONFIG       $CONFIG      "
+  # echo "job_dir	     $job_dir     "
+  # echo "xfer_job_dir $xfer_job_dir"
+  # echo "max_size     $max_size    "
+  # echo "warc_naming  $warc_naming "
+  # exit 99
 
   echo `basename $0` `date`
 
@@ -76,7 +84,7 @@ then
     exit 1
   fi
 else
-  echo "Usage: " `basename $0` $usage
+  echo "Usage:" `basename $0` $usage
   exit 1
 fi
 echo `basename $0` "done." `date`
