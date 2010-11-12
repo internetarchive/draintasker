@@ -16,7 +16,10 @@ MAX_ITEM_SIZE_GB = 10
 def get_param(fname,param):
     """ return value for param from YAML file """
     cfg = load_config(fname)
-    return cfg[param]
+    try:
+        return cfg[param]
+    except KeyError:
+        return
 
 def validate(cfg):
     """ ensure config dict has valid params """
