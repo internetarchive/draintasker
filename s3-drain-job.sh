@@ -29,12 +29,12 @@ then
   warc_naming=`config.py $CONFIG WARC_naming`
 
   # DEBUG
-  # echo "CONFIG       $CONFIG      "
-  # echo "job_dir	     $job_dir     "
-  # echo "xfer_job_dir $xfer_job_dir"
-  # echo "max_size     $max_size    "
-  # echo "warc_naming  $warc_naming "
-  # exit 99
+  echo "  CONFIG       $CONFIG      "
+  echo "  job_dir      $job_dir     "
+  echo "  xfer_job_dir $xfer_job_dir"
+  echo "  max_size     $max_size    "
+  echo "  warc_naming  $warc_naming "
+  exit 0
 
   echo `basename $0` `date`
 

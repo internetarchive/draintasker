@@ -8,7 +8,7 @@ __author__ = "siznax 2010"
 
 import sys, os, pprint
 # svn co http://svn.pyyaml.org/pyyaml/trunk/ lib/pyamml
-sys.path.append(os.getcwd()+"/lib/pyyaml/lib/")
+sys.path.append(os.getcwd()+"/lib/")
 import yaml
 
 MAX_ITEM_SIZE_GB = 10

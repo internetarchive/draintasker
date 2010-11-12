@@ -5,13 +5,14 @@ Usage: dtmon.py config [ copy ]
     copy   = copy files only - do not delete anything
 """
 __author__ = "siznax 2010"
+__version__ = "draintasker-2.2"
 
 # for man page, "pydoc dtmon"
 
 import sys, os
 
-# to be contained within ia_upldr
-class upldr:
+# to be contained within iaupldr module
+class UpLoader:
 
     def __init__(self,fname):
         """ initialize configuration """
@@ -49,11 +50,12 @@ class upldr:
         self.validate_config()
         self.configure_instance()
 
-    def drain_job(self):
-        """ call s3-drain-job.sh """
+    def drain(self):
+        """ drain job (or whatever) """
         import subprocess
         try:
-            subprocess.check_call(["s3-drain-job.sh"])
+            subprocess.check_call(["s3-drain-job.sh",
+                                   self.config_fname])
         except Exception, e:
             print "process failed:", e
             sys.exit()
@@ -65,7 +67,7 @@ class upldr:
         while True:
             self.update_config()
             if os.path.isfile(self.drainme):
-                self.drain_job()
+                self.drain()
             else:
                 print "DRAINME file not found: ", self.drainme
             print "sleep("+str(self.sleep)+")"
@@ -83,7 +85,7 @@ if __name__ == "__main__":
         if os.path.isdir(sys.argv[1]):
             print "config = dir TBD"
         else:
-            dt = upldr(sys.argv[1])
+            dt = UpLoader(sys.argv[1])
             # utils.reflect(dt)
             dt.process()
             
