@@ -309,13 +309,17 @@ then
       echo "ERROR: must give fullpath for config: $CONFIG"
       exit 1
   else
-      $DT_HOME/s3-validate-config.sh $CONFIG $HOME/.ias3cfg
+
+      # $DT_HOME/s3-validate-config.sh $CONFIG $HOME/.ias3cfg
+      echo "Aborting: need to validate config."
+      exit 99
+
       if [ $? != 0 ]
       then
           echo "ERROR: invalid config: $CONFIG"
           exit 1
       fi
-      xfer_job_dir=`grep ^xfer_dir $CONFIG | awk '{print $2}'`
+      xfer_job_dir=`config.py $CONFIG xfer_dir`
   fi
 
   back=`pwd`
@@ -339,7 +343,7 @@ then
 
       warc_series=`echo $d | egrep -o '/([^/]*)$' | tr -d "/"`
       crawler=`echo $warc_series | tr '-' ' ' | awk '{print $NF}'`
-      crawljob=`grep ^crawljob $CONFIG | awk '{print $2}'`
+      crawljob=`config.py $CONFIG crawljob`
       crawldata="$d"
 
       # handle (5xx) RETRY file
@@ -460,11 +464,11 @@ then
       secret_key=`grep secret_key $S3CFG | awk '{print $3}'`
 
       # parse config
-      title_prefix=`grep ^title_prefix $CONFIG | cut -d \" -f 2`
-      test_suffix=`grep ^test_suffix $CONFIG | awk '{print $2}'`
-      block_delay=`grep ^block_delay $CONFIG | awk '{print $2}'`
-      max_block_count=`grep ^max_block_count $CONFIG | awk '{print $2}'`
-      retry_delay=`grep ^retry_delay $CONFIG | awk '{print $2}'`
+      title_prefix=`   config.py $CONFIG title_prefix`
+      test_suffix=`    config.py $CONFIG test_suffix`
+      block_delay=`    config.py $CONFIG block_delay`
+      max_block_count=`config.py $CONFIG max_block_count`
+      retry_delay=`    config.py $CONFIG retry_delay`
 
       # parse series
       ws_date=`echo $warc_series | cut -d '-' -f 2`
@@ -486,20 +490,19 @@ then
       #   Subject: metadata for the web stuff going into the paired archive
       #   Date:  2010-09-18T12:16:00PDT
       scanner=`hostname -f`
-      creator=`grep ^creator $CONFIG | cut -d \" -f 2`
-      sponsor=`grep ^sponsor $CONFIG | cut -d \" -f 2`
-      contributor=`grep ^contributor $CONFIG | cut -d \" -f 2`
+      creator=`config.py $CONFIG creator`
+      sponsor=`config.py $CONFIG sponsor`
+      contributor=`config.py $CONFIG contributor`
       # scandate (using 14-digits of timestamp of first warc in series)
       # metadate (like books, the year)
-      operator=`grep ^operator $CONFIG | awk '{print $2}'`
-      scancenter=`grep ^scanningcenter $CONFIG | awk '{print $2}'`
+      operator=`config.py $CONFIG operator`
+      scancenter=`config.py $CONFIG scanningcenter`
       access="http://www.archive.org/details/${bucket}"
       crawler_version=`zcat ${files[0]} | head | grep software | awk '{print $2}'`
 
       # description => reports TBD
       # description="$crawler $crawljob $first_file_date $first_serial $last_serial $num_warcs $size_hint"
-      description=`grep ^description $CONFIG\
-        | cut -d \" -f 2\
+      description=`config.py $CONFIG description\
         | sed -e s/CRAWLHOST/$scanner/\
           -e s/CRAWLJOB/$crawljob/\
           -e s/START_DATE/"$start_date_HR"/\
@@ -511,7 +514,7 @@ then
       #   => collection2 = collection
       #   => collection1 = serial
       COLLECTIONS=''
-      colls=`grep ^collections $CONFIG | awk '{print $2}' | tr '/' ' '` 
+      colls=`config.py $CONFIG collections`
       coll_count=`echo $colls | wc -w`
       for c in $colls
       do
