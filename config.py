@@ -1,9 +1,8 @@
 #!/usr/bin/python
 """returns a config dict string from YAML config file
-  config.py file [param] [validate]
-    file      a YAML file
-    param     optional param to get from file
-    validate  1 = return 0 if valid (ignores param)
+Usage: config.py file [param]
+    file   a YAML config file
+    param  optional param to get from file
 """
 __author__ = "siznax 2010"
 
@@ -17,10 +16,7 @@ MAX_ITEM_SIZE_GB = 10
 def get_param(fname,param):
     """ return value for param from YAML file """
     cfg = load_config(fname)
-    try:
-        return cfg[param]
-    except KeyError:
-        return
+    return cfg[param]
 
 def validate(cfg):
     """ ensure config dict has valid params """
@@ -106,11 +102,11 @@ if __name__ == "__main__":
     else:
         """ process args """
         if len(sys.argv) == 2:
-            pprint_config(load_config(sys.argv[1]))
+            if validate(get_config(sys.argv[1])):
+                pprint_config(load_config(sys.argv[1]))
         if len(sys.argv) == 3:
             print get_param(sys.argv[1],sys.argv[2])
-        if len(sys.argv) == 4:
-            validate(get_config(sys.argv[1]))
+            
 else:
     """ on import """
     # print "imported", __name__
