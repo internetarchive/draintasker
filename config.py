@@ -83,7 +83,7 @@ def load_config(fname):
         return cfg
     except yaml.YAMLError, exc:
         print "Error parsing config:", exc
-        sys.exit()
+        sys.exit(1)
 
 def get_config(fname):
     """ verify YAML filepath, return config dict"""
