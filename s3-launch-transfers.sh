@@ -38,7 +38,6 @@
 #
 # siznax 2010
 
-DT_HOME="."
 usage="config [force] [mode=single]"
 
 TEST='false'
@@ -131,7 +130,7 @@ function write_success {
     SUCCESS_FLAG='true'
     if [ -e "$ERROR" ]
     then
-	SUCCESS_FLAG='false'
+        SUCCESS_FLAG='false'
         echo "ERROR file exists, could not write SUCCESS file." | tee -a $OPEN
     else
         for warc in `cat $MANIFEST | tr -s ' ' | cut -d ' ' -f 2`
@@ -139,23 +138,53 @@ function write_success {
             if [ ! -f "${d}/${warc}.tombstone" ]
             then
                 SUCCESS_FLAG='false'
-		echo "ERROR: missing tombstone: ${d}/${warc}" | tee -a $OPEN
-		cp $OPEN $ERROR
-		exit 5
+                echo "ERROR: missing tombstone: ${d}/${warc}" | tee -a $OPEN
+                cp $OPEN $ERROR
+                exit 5
             fi
         done
-	if [ $SUCCESS_FLAG == 'true' ]
+        if [ $SUCCESS_FLAG == 'true' ]
         then
             echo "copying TASK file:" | tee -a $OPEN
             echo "    $TASK" | tee -a $OPEN
             echo "to SUCCESS file:" | tee -a $OPEN
             echo "    $SUCCESS" | tee -a $OPEN
-	    cp $TASK $SUCCESS
+            cp $TASK $SUCCESS
 
-	    echo "compiling TOMBSTONE:" | tee -a $OPEN
-	    echo "    $TOMBSTONE" | tee -a $OPEN
-	    cat ${d}/*.tombstone | tee -a $TOMBSTONE
+            echo "compiling TOMBSTONE:" | tee -a $OPEN
+            echo "    $TOMBSTONE" | tee -a $OPEN
+            cat ${d}/*.tombstone | tee -a $TOMBSTONE
         fi
+    fi
+}
+
+function verify_etag {
+    if [ -f $tmpfile ]
+    then
+        # this is a nice solution, thanks to Kenji
+        # extract everything between quotes from Etag line,
+        # and immediately quit processing. this avoids the 
+        # problem i encountered using grep + sed + tr which 
+        # resulted in a ^M in the output, which failed the 
+        # equality test below even when the checksums matched
+        etag=`sed -ne '/ETag/{s/.*"\(.*\)".*/\1/p;q}' $tmpfile`
+        if [ $etag != $checksum ]
+        then
+            # eventually want to retry, but let's see how often 
+            # this happens
+            echo "ERROR: bad ETag!"                   | tee -a $ERROR
+            echo "  Content-MD5 request: '$checksum'" | tee -a $ERROR
+            echo "  ETag response      : '$etag'"     | tee -a $ERROR
+            bad_etag=1
+            abort_series=1
+            exit 1
+        else
+            echo "ETag OK: $etag"
+            echo "removing tmpfile: $tmpfile"
+            rm $tmpfile
+        fi
+    else
+        echo "Warning: tmpfile not found:" $tmpfile
     fi
 }
 
@@ -201,7 +230,11 @@ function check_curl_success {
             then 
                 bucket_status=1
             else
-                write_tombstone
+		verify_etag
+		if [ $bad_etag -eq 0 ]
+                then
+                    write_tombstone
+		fi
 	    fi
             keep_trying='false'
         else
@@ -302,21 +335,20 @@ then
       echo "ERROR: must give fullpath for config: $CONFIG"
       exit 1
   else
-      $DT_HOME/s3-validate-config.sh $CONFIG $HOME/.ias3cfg
+      # validate configuration
+      config.py $CONFIG
       if [ $? != 0 ]
       then
           echo "ERROR: invalid config: $CONFIG"
           exit 1
       fi
-      xfer_job_dir=`grep ^xfer_dir $CONFIG | awk '{print $2}'`
+      xfer_job_dir=`config.py $CONFIG xfer_dir`
   fi
-
-  back=`pwd`
-  cd $xfer_job_dir
 
   for d in `find $xfer_job_dir -type d | sort`
   do
 
+    PACKED="$d/PACKED"
     MANIFEST="$d/MANIFEST"
     if [ -e "$MANIFEST" ]
     then
@@ -332,13 +364,14 @@ then
 
       warc_series=`echo $d | egrep -o '/([^/]*)$' | tr -d "/"`
       crawler=`echo $warc_series | tr '-' ' ' | awk '{print $NF}'`
-      crawljob=`grep ^crawljob $CONFIG | awk '{print $2}'`
+      crawljob=`config.py $CONFIG crawljob`
       crawldata="$d"
 
       # handle (5xx) RETRY file
       if [ -e $RETRY ]
       then
-	  echo "  RETRY file exists: $RETRY ["`cat $RETRY`"]" | tee -a $OPEN
+	  echo "  RETRY file exists: $RETRY ["`cat $RETRY`"]"\
+               | tee -a $OPEN
 
           now=`date +%s`
           retry_time=`cat $RETRY`
@@ -350,8 +383,8 @@ then
 	      echo "    skipping series: $warc_series" | tee -a $OPEN
 	      continue
           else
-              echo "RETRY OK (now=$now > retry_time=$retry_time)" | tee -a $OPEN
-
+              echo "RETRY OK (now=$now > retry_time=$retry_time)"\
+                   | tee -a $OPEN
               echo "moving aside RETRY file" | tee -a $OPEN
               echo "mv $RETRY" | tee -a $OPEN
               echo "   $RETRY.${retry_time}" | tee -a $OPEN
@@ -448,11 +481,11 @@ then
       secret_key=`grep secret_key $S3CFG | awk '{print $3}'`
 
       # parse config
-      title_prefix=`grep ^title_prefix $CONFIG | cut -d \" -f 2`
-      test_suffix=`grep ^test_suffix $CONFIG | awk '{print $2}'`
-      block_delay=`grep ^block_delay $CONFIG | awk '{print $2}'`
-      max_block_count=`grep ^max_block_count $CONFIG | awk '{print $2}'`
-      retry_delay=`grep ^retry_delay $CONFIG | awk '{print $2}'`
+      title_prefix=`   config.py $CONFIG title_prefix`
+      # test_suffix=`    config.py $CONFIG test_suffix`
+      block_delay=`    config.py $CONFIG block_delay`
+      max_block_count=`config.py $CONFIG max_block_count`
+      retry_delay=`    config.py $CONFIG retry_delay`
 
       # parse series
       ws_date=`echo $warc_series | cut -d '-' -f 2`
@@ -466,7 +499,7 @@ then
       derive=0
 
       num_warcs=${nfiles_manifest}
-      size_hint=$(( $std_warc_size * $num_warcs )) # in gibibytes
+      size_hint=`cat $PACKED | awk '{print $NF}'`
       first_serial=`echo $warc_series | cut -d '-' -f 3`
       last_serial=`echo $warc_series | cut -d '-' -f 4`
 
@@ -474,20 +507,17 @@ then
       #   Subject: metadata for the web stuff going into the paired archive
       #   Date:  2010-09-18T12:16:00PDT
       scanner=`hostname -f`
-      creator=`grep ^creator $CONFIG | cut -d \" -f 2`
-      sponsor=`grep ^sponsor $CONFIG | cut -d \" -f 2`
-      contributor=`grep ^contributor $CONFIG | cut -d \" -f 2`
+      creator=`config.py $CONFIG creator`
+      sponsor=`config.py $CONFIG sponsor`
+      contributor=`config.py $CONFIG contributor`
       # scandate (using 14-digits of timestamp of first warc in series)
       # metadate (like books, the year)
-      operator=`grep ^operator $CONFIG | awk '{print $2}'`
-      scancenter=`grep ^scanningcenter $CONFIG | awk '{print $2}'`
+      operator=`config.py $CONFIG operator`
+      scancenter=`config.py $CONFIG scanningcenter`
       access="http://www.archive.org/details/${bucket}"
-      crawler_version=`zcat ${files[0]} | head | grep software | awk '{print $2}'`
-
-      # description => reports TBD
-      # description="$crawler $crawljob $first_file_date $first_serial $last_serial $num_warcs $size_hint"
-      description=`grep ^description $CONFIG\
-        | cut -d \" -f 2\
+      crawler_version=`zcat ${files[0]} | head | grep software\
+        | awk '{print $2}'`
+      description=`config.py $CONFIG description\
         | sed -e s/CRAWLHOST/$scanner/\
           -e s/CRAWLJOB/$crawljob/\
           -e s/START_DATE/"$start_date_HR"/\
@@ -499,7 +529,7 @@ then
       #   => collection2 = collection
       #   => collection1 = serial
       COLLECTIONS=''
-      colls=`grep ^collections $CONFIG | awk '{print $2}' | tr '/' ' '` 
+      colls=`config.py $CONFIG collections | tr '/' ' '`
       coll_count=`echo $colls | wc -w`
       for c in $colls
       do
@@ -508,7 +538,8 @@ then
           # --header 'x-archive-meta03-collection:${collection3}'\
           collection[${coll_count}]=$c
           coll_serial=`printf "%02d" $coll_count`
-          COLLECTIONS="${COLLECTIONS} --header 'x-archive-meta${coll_serial}-collection:${c}'"
+          COLLECTIONS="${COLLECTIONS}\
+            --header 'x-archive-meta${coll_serial}-collection:${c}'"
           ((coll_count--))
       done
 
@@ -605,6 +636,7 @@ then
       else
           echo "item/bucket created successfully: $bucket" | tee -a $OPEN
           abort_series=0
+	  bad_etag=0
       fi
 
       # 2) add WARCs to newly created item (upload-file)
@@ -685,11 +717,7 @@ then
   echo "$launch_count buckets filled"
   echo `basename $0` "done." `date`
 
-  cd $back
-
 else
-  echo "Usage: " `basename $0` $usage
+  echo "Usage:" `basename $0` $usage
   exit 1
 fi
-
-
