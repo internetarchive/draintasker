@@ -1,8 +1,7 @@
 #!/usr/bin/python
 """drain job in single mode
-Usage: dtmon.py config [ copy ]
+Usage: dtmon.py config
     config = YAML file or top-level dir
-    copy   = copy files only - do not delete anything
 """
 __author__ = "siznax 2010"
 __version__ = "draintasker-2.2"
