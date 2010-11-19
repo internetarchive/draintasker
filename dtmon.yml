@@ -1,11 +1,12 @@
 # -*- mode: sh -*- (yaml-mode would be better)
 #
-# dtmon.yml  - draintasker "simple" config file
+# dtmon.yml  - draintasker YAML config file
 #
 # * this file is read everytime it is needed, so your 
 #   changes effect existing processes
-# * please be verbose in your description_effort
-#   required keywords: CRAWLHOST, CRAWLJOB, START_DATE, END_DATE
+# * please be verbose in {describe_effort} (and remove braces)
+# * required keywords (do note remove them): 
+#   CRAWLHOST, CRAWLJOB, START_DATE, END_DATE
 #
 # siznax 2010
 
@@ -29,7 +30,6 @@ description:     Internet Archive crawldata
 operator:        tbd@archive.org
 collections:     TBD/TBD/TBD
 title_prefix:    TBD Crawldata
-# test_suffix:   -test-17
 creator:         Internet Archive
 sponsor:         Internet Archive
 contributor:     Internet Archive
