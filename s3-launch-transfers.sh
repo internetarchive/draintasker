@@ -699,6 +699,7 @@ then
       then
         echo "$launch_count buckets filled"
         echo "mode = $mode, exiting normally."
+        echo `basename $0` "done." `date`
         exit 0
       fi
 
