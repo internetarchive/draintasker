@@ -1,7 +1,7 @@
 #!/usr/bin/python
 """drain job in single mode
 Usage: dtmon.py config
-    config = YAML file or top-level dir
+  config = YAML file like dtmon.yml
 """
 __author__ = "siznax 2010"
 __version__ = "draintasker-2.2"
@@ -57,7 +57,7 @@ class UpLoader:
                                    self.config_fname])
         except Exception, e:
             print "process failed:", e
-            sys.exit()
+            sys.exit(1)
 
     def process(self):
         """ if DRAINME file exists, update config, drain job, sleep """
@@ -69,9 +69,9 @@ class UpLoader:
                 self.drain()
             else:
                 print "DRAINME file not found: ", self.drainme
-            print "sleep("+str(self.sleep)+")"
+            print "sleep(" + str(self.sleep) + ")"
+            sys.stdout.flush()
             time.sleep(self.sleep)
-        utils.echo_finish(self.name)
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
