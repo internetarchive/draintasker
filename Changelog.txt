@@ -1,3 +1,15 @@
+2010-11-19
+----
+r38-r57 | Fri, 19 Nov 2010
+* added support for YAML config file
+* added yaml 3.09 for dtmon.py
+* added config.py, utils.py for dtmon.py
+* migrated dtmon.sh to python (dtmon.py)
+* migrated dtmon.cfg to YAML (dtmon.yml)
+* verify ETag on S3 PUT success, ERROR on mis-match
+* send actual series size for size_hint
+* added eject_tombstones.sh to speed processing
+
 2010-10-28
 ----
 r37 | steve | 2010-10-28 00:45:05 UTC
