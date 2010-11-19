@@ -18,19 +18,19 @@ run like this:
   $ ssh -A crawler
   $ cd /path/draintasker
   $ svn up
-  $ emacs dtmon.cfg, save-as: /path/drain.cfg
-  $ dtmon.sh /path/drain.cfg | tee -a /path/drain.log
+  $ emacs dtmon.yml, save-as: /path/drain.yml
+  $ dtmon.py /path/drain.yml | tee -a /path/drain.log
 
 PROCESSING 
 
-  monitor job and drain (with dtmon.sh) - while DRAINME file exists,
+  monitor job and drain (with dtmon.py) - while DRAINME file exists,
   pack warcs (PACKED), make manifests (MANIFEST), launch transfers
   (TASK), verify transfers (TOMBSTONE), and finally, delete verified
   warcs, then sleep before trying again.
 
 under-the-hood:
 
-  dtmon.sh config
+  dtmon.py config
   |
   '-> s3-drain-job job_dir xfer_job_dir max_size warc_naming
      |
@@ -65,13 +65,13 @@ some advice:
      ./launch-transfers.sh 
   5) log into home and open a screen session
   6) in screen, ssh crawler, cd /path/draintasker/, svn up
-  7) run dtmon.sh to continuously drain each job+disk
+  7) run dtmon.py to continuously drain each job+disk
      [screen]
        cd /path/draintasker
-       ./dtmon.sh /path/disk1.cfg
+       ./dtmon.py /path/disk1.yml
      [screen]
        cd /path/draintasker
-       ./dtmon.sh /path/disk3.cfg
+       ./dtmon.py /path/disk3.yml
 
 CONFIGURATION
 
@@ -95,8 +95,8 @@ and be "packed" into
     
 DEPENDENCIES
 
-  dtmon.sh (IAS3-to-petabox)
-    + HOME/.ias3cfg (when using dtmon.sh)
+  dtmon.py (IAS3-to-petabox)
+    + HOME/.ias3cfg (when using dtmon.py)
     + add [incoming_x] stanzas to /etc/rsyncd.conf (see wiki)
   th-dtmon.sh (catalog-direct-to-thumper)
     + ~/.wgetrc with your archive.org user cookies (see wiki)
@@ -127,7 +127,7 @@ human readable form of that time with the date cmd, like so:
 
 DRAIN DAEMON
 
-  dtmon.sh      run s3-drain-job periodically
+  dtmon.py      run s3-drain-job periodically
   th-dtmon.sh   run drain-job periodically
   drain-job.sh  run draintasker processes in single mode
 
@@ -155,19 +155,6 @@ UTILS
   check-crawldata.sh         report source crawldata file count+size
   copy-crawldata.sh          copy all crawldata preserving dir structure 
   make-and-store-bundle.sh   make bundles and scp to staging
-
-THUMPER (NON-FUNCTIONAL-DEPRECATED)
-
-  should be up-to-date in dtmon.cfg:
-
-    thumper [thumper]
-
-  the target thumper is reported periodically by petabox ops,
-  and the latest transfers (viewable through catalog) indicate
-  the current/lastest target hostname:
-
-  http://home.us.archive.org/catalog.php?\
-    search_identifier=move_to_thumper_WS_*&history=1 
 
 ----
 siznax 2010
