@@ -56,8 +56,7 @@ class UpLoader:
             subprocess.check_call(["s3-drain-job.sh",
                                    self.config_fname])
         except Exception, e:
-            print "process failed:", e
-            sys.exit(1)
+            print "Warning: process failed:", e
 
     def process(self):
         """ if DRAINME file exists, update config, drain job, sleep """
