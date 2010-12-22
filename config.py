@@ -74,6 +74,9 @@ def validate(cfg):
     for key in ('creator','sponsor','contributor','scanningcenter'):
         if not cfg.has_key(key):
             raise ValueError, "missing key: " + key
+    # derive is int
+    if not type(cfg['derive']) == int:
+        raise ValueError, "derive must be int: " + cfg['derive']
     return True
 
 def pprint_config(cfg):

@@ -23,10 +23,10 @@ if [ -f "$1" ]
 then
 
   CONFIG=$1
-  job_dir=`config.py $CONFIG job_dir`
-  xfer_job_dir=`config.py $CONFIG xfer_dir`
-  max_size=`config.py $CONFIG max_size`
-  warc_naming=`config.py $CONFIG WARC_naming`
+  job_dir=`./config.py $CONFIG job_dir`
+  xfer_job_dir=`./config.py $CONFIG xfer_dir`
+  max_size=`./config.py $CONFIG max_size`
+  warc_naming=`./config.py $CONFIG WARC_naming`
 
   # DEBUG
   # echo "  CONFIG       $CONFIG      "

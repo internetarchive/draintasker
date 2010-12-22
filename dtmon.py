@@ -53,7 +53,7 @@ class UpLoader:
         """ drain job (or whatever) """
         import subprocess
         try:
-            subprocess.check_call(["s3-drain-job.sh",
+            subprocess.check_call(["./s3-drain-job.sh",
                                    self.config_fname])
         except Exception, e:
             print "Warning: process failed:", e

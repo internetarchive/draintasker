@@ -162,11 +162,11 @@ function verify_etag {
     if [ -f $tmpfile ]
     then
         # this is a nice solution, thanks to Kenji
-        # extract everything between quotes from Etag line,
-        # and immediately quit processing. this avoids the 
-        # problem i encountered using grep + sed + tr which 
-        # resulted in a ^M in the output, which failed the 
-        # equality test below even when the checksums matched
+        # extract everything between quotes from Etag line, and 
+        # immediately quit processing. it's far more efficient, 
+        # and avoids the problem i had using grep + awk + tr 
+        # which resulted in a ^M in the output, which failed 
+        # the equality test below when it shouldn't have
         etag=`sed -ne '/ETag/{s/.*"\(.*\)".*/\1/p;q}' $tmpfile`
         if [ $etag != $checksum ]
         then
@@ -222,12 +222,13 @@ function check_curl_success {
         echo_curl_output
         echo "curl finished with status: $?" | tee -a $OPEN
         response_code=`echo $output | cut -d ' ' -f 1`
-        if [ "$response_code" == "201" ] # SUCCESS
+        if [ "$response_code" == "200" ] || [ "$response_code" == "201" ]
         then
     	    echo "SUCCESS: S3 PUT succeeded with response_code:"\
                  "$response_code" | tee -a $OPEN
-	    if [ $upload_type == "auto-make-bucket" ]
-            then 
+	    if [ $upload_type == "auto-make-bucket" ] ||\
+               [ $upload_type == "test-add-to-bucket" ]
+            then
                 bucket_status=1
             else
 		verify_etag
@@ -336,13 +337,13 @@ then
       exit 1
   else
       # validate configuration
-      config.py $CONFIG
+      ./config.py $CONFIG
       if [ $? != 0 ]
       then
           echo "ERROR: invalid config: $CONFIG"
           exit 1
       fi
-      xfer_job_dir=`config.py $CONFIG xfer_dir`
+      xfer_job_dir=`./config.py $CONFIG xfer_dir`
   fi
 
   for d in `find $xfer_job_dir -type d | sort`
@@ -364,7 +365,7 @@ then
 
       warc_series=`echo $d | egrep -o '/([^/]*)$' | tr -d "/"`
       crawler=`echo $warc_series | tr '-' ' ' | awk '{print $NF}'`
-      crawljob=`config.py $CONFIG crawljob`
+      crawljob=`./config.py $CONFIG crawljob`
       crawldata="$d"
 
       # handle (5xx) RETRY file
@@ -481,11 +482,11 @@ then
       secret_key=`grep secret_key $S3CFG | awk '{print $3}'`
 
       # parse config
-      title_prefix=`   config.py $CONFIG title_prefix`
-      # test_suffix=`    config.py $CONFIG test_suffix`
-      block_delay=`    config.py $CONFIG block_delay`
-      max_block_count=`config.py $CONFIG max_block_count`
-      retry_delay=`    config.py $CONFIG retry_delay`
+      title_prefix=`./config.py $CONFIG title_prefix`
+      # test_suffix=`./config.py $CONFIG test_suffix`
+      block_delay=`./config.py $CONFIG block_delay`
+      max_block_count=`./config.py $CONFIG max_block_count`
+      retry_delay=`./config.py $CONFIG retry_delay`
 
       # parse series
       ws_date=`echo $warc_series | cut -d '-' -f 2`
@@ -496,7 +497,7 @@ then
       mediatype='web'
       title="${title_prefix} ${date_range}"
       subject='crawldata'
-      derive=0
+      derive=`./config.py $CONFIG derive`
 
       num_warcs=${nfiles_manifest}
       size_hint=`cat $PACKED | awk '{print $NF}'`
@@ -507,17 +508,17 @@ then
       #   Subject: metadata for the web stuff going into the paired archive
       #   Date:  2010-09-18T12:16:00PDT
       scanner=`hostname -f`
-      creator=`config.py $CONFIG creator`
-      sponsor=`config.py $CONFIG sponsor`
-      contributor=`config.py $CONFIG contributor`
+      creator=`./config.py $CONFIG creator`
+      sponsor=`./config.py $CONFIG sponsor`
+      contributor=`./config.py $CONFIG contributor`
       # scandate (using 14-digits of timestamp of first warc in series)
       # metadate (like books, the year)
-      operator=`config.py $CONFIG operator`
-      scancenter=`config.py $CONFIG scanningcenter`
+      operator=`./config.py $CONFIG operator`
+      scancenter=`./config.py $CONFIG scanningcenter`
       access="http://www.archive.org/details/${bucket}"
       crawler_version=`zcat ${files[0]} | head | grep software\
         | awk '{print $2}'`
-      description=`config.py $CONFIG description\
+      description=`./config.py $CONFIG description\
         | sed -e s/CRAWLHOST/$scanner/\
           -e s/CRAWLJOB/$crawljob/\
           -e s/START_DATE/"$start_date_HR"/\
@@ -529,7 +530,7 @@ then
       #   => collection2 = collection
       #   => collection1 = serial
       COLLECTIONS=''
-      colls=`config.py $CONFIG collections | tr '/' ' '`
+      colls=`./config.py $CONFIG collections | tr '/' ' '`
       coll_count=`echo $colls | wc -w`
       for c in $colls
       do
@@ -579,17 +580,12 @@ then
       echo "  lastfiledate    = $last_file_date"
       echo "  lastdate        = $last_date"
 
-      echo "Creating item: http://archive.org/details/${bucket}" | tee -a $OPEN
-
       if [ $force == 0 ]; then query_user; fi
 
       # 1) create new item with MANIFEST, metadata (auto-make-bucket)
       # --------------------------------------------------------------
-      filepath=$MANIFEST
-      filename=`echo $filepath | grep -o "[^/]*$"`".txt"
       copts="--include --location\
        --header 'x-amz-auto-make-bucket:1'\
-       --header 'x-archive-queue-derive:${derive}'\
        --header 'x-archive-size-hint:${size_hint}'\
        --header \"authorization: LOW ${access_key}:${secret_key}\"\
        --header 'x-archive-meta-mediatype:${mediatype}'\
@@ -615,12 +611,13 @@ then
        --header 'x-archive-meta-lastfileserial:${last_serial}'\
        --header 'x-archive-meta-lastfiledate:${last_file_date}'\
        --header 'x-archive-meta-lastdate:${last_date}'\
-       --write-out '%{http_code} %{size_upload} %{time_total}'\
-       --upload-file ${filepath}"
+       --header 'x-archive-queue-derive:0'\
+       --write-out '%{http_code} %{size_upload} %{time_total}'"
       retry_count=0
       keep_trying='true'
       upload_type="auto-make-bucket"
       bucket_status=0
+      echo "Creating item: http://archive.org/details/${bucket}" | tee -a $OPEN
       until [ $keep_trying == 'false' ] # RETRY loop
       do
 	  echo "-----" | tee -a $OPEN
@@ -639,7 +636,26 @@ then
 	  bad_etag=0
       fi
 
-      # 2) add WARCs to newly created item (upload-file)
+      # 2) try uploading a small file to the new item first
+      # ----------------------------------------------------------------
+      filepath=$MANIFEST
+      filename=`echo $filepath | grep -o "[^/]*$"`".txt"
+      retry_count=0
+      keep_trying='true'
+      upload_type="test-add-to-bucket"
+      copts="--include --location\
+       --header \"authorization: LOW ${access_key}:${secret_key}\"\
+       --header 'x-archive-queue-derive:0'\
+       --write-out '%{http_code} %{size_upload} %{time_total}'\
+       --upload-file ${filepath}"
+      echo "Uploading $MANIFEST" | tee -a $OPEN
+      until [ $keep_trying == 'false' ] # RETRY loop
+      do
+          echo "-----" | tee -a $OPEN
+          curl_s3
+      done
+
+      # 3) add WARCs to newly created item (upload-file)
       # ----------------------------------------------------------------
       echo "----" | tee -a $OPEN
       echo "Uploading (${num_warcs}) warcs with size hint: $size_hint bytes"\
@@ -654,14 +670,25 @@ then
           retry_count=0
           keep_trying='true'
           upload_type="add-to-bucket"
+          derive_header="--header 'x-archive-queue-derive:0'"
           until [ $keep_trying == 'false' ] # RETRY loop
           do
               echo "----" | tee -a $OPEN
               echo "["$((${i}+1))"/${#files[@]}]: ${filename}" | tee -a $OPEN
+
+              # derives happen UNLESS you send derive:0
+              if [ $((i+1)) -eq ${#files[@]} ]
+              then
+                  if [ $derive -eq 1 ]
+                  then
+                      derive_header=""
+                  fi
+              fi
+
               copts="--include --location\
                      --header \"authorization: LOW ${access_key}:${secret_key}\"\
                      --header \"Content-MD5: ${checksum}\"\
-                     --header 'x-archive-queue-derive:${derive}'\
+                     ${derive_header}\
                      --write-out '%{http_code} %{size_upload} %{time_total}'\
                      --upload-file ${filepath}"
               curl_s3
