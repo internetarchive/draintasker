@@ -27,14 +27,16 @@ then
   xfer_job_dir=`./config.py $CONFIG xfer_dir`
   max_size=`./config.py $CONFIG max_size`
   warc_naming=`./config.py $CONFIG WARC_naming`
+  compactify=`./config.py $CONFIG compact_names`
 
   # DEBUG
-  # echo "  CONFIG       $CONFIG      "
-  # echo "  job_dir      $job_dir     "
-  # echo "  xfer_job_dir $xfer_job_dir"
-  # echo "  max_size     $max_size    "
-  # echo "  warc_naming  $warc_naming "
-  # exit 99
+  echo "  CONFIG       $CONFIG      "
+  echo "  job_dir      $job_dir     "
+  echo "  xfer_job_dir $xfer_job_dir"
+  echo "  max_size     $max_size    "
+  echo "  warc_naming  $warc_naming "
+  echo "  compactify   $compactify  "
+  exit 99
 
   echo `basename $0` `date`
 
@@ -48,7 +50,8 @@ then
     fi
 
     # pack a single series
-    ./pack-warcs.sh $job_dir $xfer_job_dir $max_size $warc_naming 1 single
+    ./pack-warcs.sh $job_dir $xfer_job_dir $max_size\
+        $warc_naming 1 single $compactify
     if [ $? != 0 ]
     then
       echo "ERROR packing warcs: $?"

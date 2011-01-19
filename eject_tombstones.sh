@@ -6,6 +6,7 @@
 if [ $# -lt 1 ] 
 then
     echo "Usage:" `basename $0` "xfer_dir"
+    exit
 else
     xfer_dir=$1
     done_dir="${1}_done"

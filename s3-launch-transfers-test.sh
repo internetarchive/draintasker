@@ -72,9 +72,13 @@ function set_tISO {
 function set_date_range {
 
     # get warc start date
-    t=`echo $files[0]\
-      | cut -d '-' -f 2\
-      | grep -o "[0-9]\{17\}"`
+    first_file=`echo ${files[0]} | tr '/' ' ' | awk '{print $NF}'`
+    if [ $compact_names == 1 ]
+    then
+        t=`echo $files[0] | cut -d '-' -f 2`
+    else
+        t=`echo $files[0] | cut -d '-' -f 2 | grep -o "[0-9]\{17\}"`
+    fi
     first_file_date=$t
     set_tISO
     start_date_ISO=${tISO}
@@ -87,16 +91,18 @@ function set_date_range {
     # get dates from last file in series
     if [ ${#files[@]} -gt 1 ]
     then
-        last_file="${files[@]:$((${#files[@]}-1))}"
-        t=`echo "${files[@]:$((${#files[@]}-1))}"\
-            | tr '/' ' '\
-            | awk '{print $NF}'\
-            | cut -d '-' -f 2\
-            | grep -o "[0-9]\{17\}"`
+        last_file=`echo "${files[@]:$((${#files[@]}-1))}"\
+                   | tr '/' ' ' | awk '{print $NF}'`
+        if [ $compact_names == 1 ]
+        then
+            t=`echo $last_file | cut -d '-' -f 2 | grep -o "[0-9]\{14\}"`
+        else
+            t=`echo $last_file | cut -d '-' -f 2 | grep -o "[0-9]\{17\}"`
+        fi
         last_file_date=$t
         # warc end date (from last file mtime). should (closely) 
         # correspond to time of last record in series
-        t=`stat --format=%y "$last_file"\
+        t=`stat --format=%x "${files[@]:$((${#files[@]}-1))}"\
           | cut -d '.' -f 1\
           | tr  -d '-'\
           | tr  -d ' '\
@@ -374,6 +380,7 @@ then
       crawler=`echo $warc_series | tr '-' ' ' | awk '{print $NF}'`
       crawljob=`./config.py $CONFIG crawljob`
       crawldata="$d"
+      compact_names=`./config.py $CONFIG compact_names`
 
       # handle (5xx) RETRY file
       if [ -e $RETRY ]
@@ -513,8 +520,16 @@ then
 
       num_warcs=${nfiles_manifest}
       size_hint=`cat $PACKED | awk '{print $NF}'`
-      first_serial=`echo $warc_series | cut -d '-' -f 3`
-      last_serial=`echo $warc_series | cut -d '-' -f 4`
+      if [ $compact_names == 1 ]
+      then
+          first_serial=`echo $first_file\
+            | cut -d '-' -f 3 | sed -e 's/.warc.gz//'`
+          last_serial=` echo $last_file\
+            | cut -d '-' -f 3 | sed -e 's/.warc.gz//'`
+      else
+          first_serial=`echo $warc_series | cut -d '-' -f 3`
+          last_serial=` echo $warc_series | cut -d '-' -f 4`
+      fi
 
       # metadata per BK, intended to be like books
       #   Subject: metadata for the web stuff going into the paired archive
@@ -534,7 +549,8 @@ then
         | sed -e s/CRAWLHOST/$scanner/\
           -e s/CRAWLJOB/$crawljob/\
           -e s/START_DATE/"$start_date_HR"/\
-          -e s/END_DATE/"$end_date_HR"/`
+          -e s/END_DATE/"$end_date_HR"/\
+        | tr -s ' '`
 
       # support multiple arbitrary collections
       # webwidecrawl/collection/serial
@@ -624,7 +640,8 @@ then
        --header 'x-archive-meta-lastfiledate:${last_file_date}'\
        --header 'x-archive-meta-lastdate:${last_date}'\
        --header 'x-archive-queue-derive:0'\
-       --write-out '%{http_code} %{size_upload} %{time_total}'"
+       --write-out '%{http_code} %{size_upload} %{time_total}'\
+       --upload-file $MANIFEST"
       retry_count=0
       keep_trying='true'
       upload_type="auto-make-bucket"

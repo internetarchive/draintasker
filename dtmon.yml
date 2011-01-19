@@ -35,4 +35,5 @@ sponsor:         Internet Archive
 contributor:     Internet Archive
 scanningcenter:  sanfrancisco
 
-derive:          1
+derive:          0
+compact_names:   1

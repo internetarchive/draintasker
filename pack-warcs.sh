@@ -34,7 +34,8 @@
 #
 # siznax 2009
 
-usage="$0 job_dir xfer_dir max_size warc_naming [force] [mode=single]"
+usage[0]="job_dir xfer_dir max_size warc_naming"
+usage[1]="[force] [mode=single] [compactify=0]"
 
 function query_user {
   echo "Continue [Y/n]> "
@@ -46,28 +47,46 @@ function query_user {
   fi
 }
 
-function set_warc_series_1 {
-  # naming scheme change broke this!
-  # https://webarchive.jira.com/browse/HER-1727
-  #
-  # WAS {TLA}-{timestamp}-{serial}-{fqdn}.warc.gz
-  # IS  {TLA}-{timestamp}-{serial}-{PID}~{fqdn}~{port}.warc.gz
-
-  b=`echo $f | cut -d '.' -f 1 | grep -o "[^/]*" | tail -1`
-  crawler=`echo $b | cut -d '~' -f 2`
-  first_serial=`echo $b | tr "-" " " | awk '{print $((NF-1))}'`
-  timestamp=`echo $b | tr "-" " " | awk '{print $((NF-2))}'`
-  prefix=`echo $b | sed "s/-${timestamp}-${first_serial}-${crawler}//"`
-  warc_series="${prefix}-${timestamp}-${first_serial}"
+function compactify_target {
+  # should be warc_naming_1 and 2 safe
+  mv_prefix=`   echo $mfile | cut -d '-' -f 1`
+  mv_timestamp=`echo $mfile | cut -d '-' -f 2`
+  mv_serial=`   echo $mfile | cut -d '-' -f 3`
+  mv_ext=`      echo $mfile | tr '.' ' ' | awk '{print $((NF-1))"."$NF}'`
+  target="$xfer_dir/${mv_prefix}-${mv_timestamp:0:14}-${mv_serial}.${mv_ext}"
+  unset mv_prefix
+  unset mv_timestamp
+  unset mv_serial
 }
 
-function set_warc_series_2 {
-  b=`echo $f | cut -d '.' -f 1`
-  prefix=`echo $b | cut -d '-' -f 1`
-  timestamp=`echo $b | cut -d '-' -f 2`
+# {TLA}-{timestamp}-{serial}-{fqdn}.warc.gz
+function set_warc_series_1 {
+  b=`           echo $f | cut -d '.' -f 1`
+  prefix=`      echo $b | cut -d '-' -f 1`
+  timestamp=`   echo $b | cut -d '-' -f 2`
   first_serial=`echo $b | cut -d '-' -f 3`
-  crawler=`echo $b | cut -d '~' -f 2`
-  warc_series="${prefix}-${timestamp}-${first_serial}"
+  crawler=`     echo $b | cut -d '-' -f 4`
+  if [ $compactify -eq 1 ]
+  then
+      warc_series="${prefix}-${timestamp:0:14}-${crawler}"
+  else
+      warc_series="${prefix}-${timestamp}-${first_serial}"
+  fi
+}
+
+# {TLA}-{timestamp}-{serial}-{PID}~{fqdn}~{port}.warc.gz
+function set_warc_series_2 {
+  b=`           echo $f | cut -d '.' -f 1`
+  prefix=`      echo $b | cut -d '-' -f 1`
+  timestamp=`   echo $b | cut -d '-' -f 2`
+  first_serial=`echo $b | cut -d '-' -f 3`
+  crawler=`     echo $b | cut -d '~' -f 2`
+  if [ $compactify -eq 1 ]
+  then
+      warc_series="${prefix}-${timestamp:0:14}-${crawler}"
+  else
+      warc_series="${prefix}-${timestamp}-${first_serial}"
+  fi
 }
 
 function report_done {
@@ -81,7 +100,7 @@ function report_done {
 
 ################################################################
 
-if [ -n "$4" ]
+if [ $# -gt 4 ]
 then
 
   job_dir=$1
@@ -90,9 +109,11 @@ then
   warc_naming=$4
   force=$5
   mode=$6
+  compactify=$7
 
   if [ -z $force ]; then force=0; fi
   if [ -z $mode  ]; then mode=0;  fi
+  if [ -z $compactify ]; then compactify=0;  fi
 
   echo `basename $0` `date`
 
@@ -255,13 +276,19 @@ then
 	    | awk '{l=split($job_dir, a, "-"); printf(a[l-1]);}'`
         num_mfiles=$(( ${#mfiles[@]} ))
         (( mcount++ ))
-        warc_series="${warc_series}-${last_serial}-${crawler}"
+        if [ $compactify -ne 1 ]
+        then
+            warc_series="${warc_series}-${last_serial}-${crawler}"
+        fi
         pack_info="$warc_series $mcount $msize"
       else
         last_serial=`echo "${mfiles[${mcount}-1]}"\
             | awk '{l=split($job_dir, a, "-"); printf(a[l-1]);}'`
         num_mfiles=$(( ${#mfiles[@]} - 1 ))
-        warc_series="${warc_series}-${last_serial}-${crawler}"
+        if [ $compactify -ne 1 ]
+        then
+            warc_series="${warc_series}-${last_serial}-${crawler}"
+        fi
         pack_info="$warc_series $mcount $prev_msize"
       fi 
       xfer_dir="$xfer_home/${warc_series}"
@@ -304,14 +331,27 @@ echo
       fi
 
       # move files in this manifest
-      for (( i=0;i<$num_mfiles;i++)); do
-        echo "mv ${mfiles[${i}]} $xfer_dir"
-        mv ${mfiles[${i}]} $xfer_dir
-	if [ $? != 0 ]; then
+      for (( i=0;i<$num_mfiles;i++))
+      do
+        mfile=`echo ${mfiles[${i}]} | tr '/' ' ' | awk '{print $NF}'`
+        if [ $compactify -eq 1 ]
+        then
+            source=${mfiles[${i}]}
+            compactify_target
+        else
+            source=${mfiles[${i}]}
+            target=$xfer_dir
+        fi
+        echo "mv $source $target"
+        mv $source $target
+	if [ $? != 0 ]
+        then
 	  echo "ERROR: mv failed"
 	  exit 1
 	else
 	  ((pack_count++))  
+          unset source
+          unset target
 	fi
       done       
 
@@ -365,7 +405,7 @@ echo
   cd $back
 
 else 
-  echo $usage
+  echo `basename $0` ${usage[@]}
   exit 1
 fi
 

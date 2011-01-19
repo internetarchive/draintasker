@@ -77,6 +77,10 @@ def validate(cfg):
     # derive is int
     if not type(cfg['derive']) == int:
         raise ValueError, "derive must be int: " + cfg['derive']
+    # compact_names is int
+    if not type(cfg['compact_names']) == int:
+        raise ValueError, "compact_names must be int: " + cfg['compact_names']
+
     return True
 
 def pprint_config(cfg):
