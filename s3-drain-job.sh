@@ -30,13 +30,13 @@ then
   compactify=`./config.py $CONFIG compact_names`
 
   # DEBUG
-  echo "  CONFIG       $CONFIG      "
-  echo "  job_dir      $job_dir     "
-  echo "  xfer_job_dir $xfer_job_dir"
-  echo "  max_size     $max_size    "
-  echo "  warc_naming  $warc_naming "
-  echo "  compactify   $compactify  "
-  exit 99
+  # echo "  CONFIG       $CONFIG      "
+  # echo "  job_dir      $job_dir     "
+  # echo "  xfer_job_dir $xfer_job_dir"
+  # echo "  max_size     $max_size    "
+  # echo "  warc_naming  $warc_naming "
+  # echo "  compactify   $compactify  "
+  # exit 99
 
   echo `basename $0` `date`
 
