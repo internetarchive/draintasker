@@ -1,10 +1,12 @@
-2011-01-19: r62 | steve | 2011-01-19 19:18:28 UTC
-----
+2011-01-19: fixes for deriver (no target release)
+---- 
+r62 | steve | 2011-01-19 19:18:28 UTC
 * added support for shorter id and filenames (compact_names)
 * added support to queue derive via config
 
-2010-11-19: r57 | Fri, 19 Nov 2010
+2010-11-19: updates for AIT (draintasker-2.2)
 ----
+r59 | Fri, 19 Nov 2010
 * added support for YAML config file
 * added yaml 3.09 for dtmon.py
 * added config.py, utils.py for dtmon.py
@@ -14,8 +16,9 @@
 * send actual series size for size_hint
 * added eject_tombstones.sh to speed processing
 
-2010-10-28: r37 | steve | 2010-10-28 00:45:05 UTC
+2010-10-28: s3 upload fixes (no target release)
 ----
+r37 | steve | 2010-10-28 00:45:05 UTC
 * deprecated (non-functional) thumper mode, 
 * renamed s3-dtmon.sh to dtmon.sh (#661451), 
 * check gzip before upload (#661519), 
@@ -26,8 +29,9 @@
 * check required description keywords (#667021), 
 * TODO file deleted in favor of Launchpad
 
-2010-10-04: r36 | steve | 2010-10-05 00:31:22 UTC
+2010-10-04: support s3 uploads (draintasker2.1)
 ----
+r36 | steve | 2010-10-05 00:31:22 UTC
 * added contributor, lastdate. 
 * use actual date of last capture for title, description, lastdate. 
 * rich description with keywords. 
