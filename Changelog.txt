@@ -3,6 +3,8 @@
 r62 | steve | 2011-01-19 19:18:28 UTC
 * added support for shorter id and filenames (compact_names)
 * added support to queue derive via config
+* send (small) manifest after auto-make-bucket to prevent 
+  saturating line with failed warc uploads
 
 2010-11-19: updates for AIT (draintasker-2.2)
 ----
