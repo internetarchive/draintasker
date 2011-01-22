@@ -600,6 +600,8 @@ then
 
       # 1) create new item with MANIFEST, metadata (auto-make-bucket)
       # --------------------------------------------------------------
+      filepath=$MANIFEST
+      filename=`echo $filepath | grep -o "[^/]*$"`".txt"
       copts="--include --location\
        --header 'x-amz-auto-make-bucket:1'\
        --header 'x-archive-size-hint:${size_hint}'\
@@ -629,7 +631,7 @@ then
        --header 'x-archive-meta-lastdate:${last_date}'\
        --header 'x-archive-queue-derive:0'\
        --write-out '%{http_code} %{size_upload} %{time_total}'\
-       --upload-file $MANIFEST"
+       --upload-file ${filepath}"
       retry_count=0
       keep_trying='true'
       upload_type="auto-make-bucket"
