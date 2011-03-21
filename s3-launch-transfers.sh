@@ -174,7 +174,7 @@ function verify_etag {
         # which resulted in a ^M in the output, which failed 
         # the equality test below when it shouldn't have
         etag=`sed -ne '/ETag/{s/.*"\(.*\)".*/\1/p;q}' $tmpfile`
-        if [ $etag != $checksum ]
+        if [ "$etag" != "$checksum" ]
         then
             # eventually want to retry, but let's see how often 
             # this happens
@@ -232,10 +232,15 @@ function check_curl_success {
         then
     	    echo "SUCCESS: S3 PUT succeeded with response_code:"\
                  "$response_code" | tee -a $OPEN
-	    if [ $upload_type == "auto-make-bucket" ] ||\
-               [ $upload_type == "test-add-to-bucket" ]
+	    if [ $upload_type == "auto-make-bucket" ]
             then
                 bucket_status=1
+            fi
+            if [ $upload_type == "test-add-to-bucket" ]
+            then
+                bucket_status=1
+                echo "creating file: $BUCKET_OK"
+                touch $BUCKET_OK
             else
 		verify_etag
 		if [ $bad_etag -eq 0 ]
@@ -367,6 +372,7 @@ then
       ERROR="$d/ERROR"
       SUCCESS="$d/SUCCESS"
       TOMBSTONE="$d/TOMBSTONE"
+      BUCKET_OK="$d/BUCKET_OK"
       tmpfile="/var/tmp/curl.out.$$"
 
       warc_series=`echo $d | egrep -o '/([^/]*)$' | tr -d "/"`
@@ -640,7 +646,14 @@ then
       until [ $keep_trying == 'false' ] # RETRY loop
       do
 	  echo "-----" | tee -a $OPEN
-          curl_s3
+          if [ -f "$BUCKET_OK" ]
+          then
+              echo "BUCKET_OK exists, skipping $upload_type"
+              keep_trying='false'
+              bucket_status=1
+          else
+              curl_s3
+          fi
       done
 
       # if auto-make-bucket has failed, do not try to upload warcs
@@ -671,7 +684,13 @@ then
       until [ $keep_trying == 'false' ] # RETRY loop
       do
           echo "-----" | tee -a $OPEN
-          curl_s3
+          if [ -f "$BUCKET_OK" ]
+          then
+              echo "BUCKET_OK exists, skipping $upload_type"
+              keep_trying='false'
+          else
+              curl_s3
+          fi
       done
 
       # 3) add WARCs to newly created item (upload-file)
@@ -695,27 +714,34 @@ then
               echo "----" | tee -a $OPEN
               echo "["$((${i}+1))"/${#files[@]}]: ${filename}" | tee -a $OPEN
 
-              # derives happen UNLESS you send derive:0
-              if [ $((i+1)) -eq ${#files[@]} ]
+              if [ -f $tombstone ]
               then
-                  if [ $derive -eq 1 ]
+                  echo "tombstone exists, skipping upload: $tombstone"
+                  keep_trying='false'
+              else
+                  # derives happen UNLESS you send derive:0
+                  if [ $((i+1)) -eq ${#files[@]} ]
                   then
-                      derive_header=""
+                      if [ $derive -eq 1 ]
+                      then
+                          derive_header=""
+                      fi
                   fi
+                  copts="--include --location\
+                         --header \"authorization: LOW ${access_key}:${secret_key}\"\
+                         --header \"Content-MD5: ${checksum}\"\
+                         ${derive_header}\
+                         --write-out '%{http_code} %{size_upload} %{time_total}'\
+                         --upload-file ${filepath}"
+                  curl_s3
               fi
 
-              copts="--include --location\
-                     --header \"authorization: LOW ${access_key}:${secret_key}\"\
-                     --header \"Content-MD5: ${checksum}\"\
-                     ${derive_header}\
-                     --write-out '%{http_code} %{size_upload} %{time_total}'\
-                     --upload-file ${filepath}"
-              curl_s3
 	      if [ $abort_series -eq 1 ]
               then
                    echo "Aborting warc_series: $warc_series" | tee -a $OPEN
                    continue 3
               fi
+
           done
       done
 
