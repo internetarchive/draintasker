@@ -235,8 +235,7 @@ function check_curl_success {
 	    if [ $upload_type == "auto-make-bucket" ]
             then
                 bucket_status=1
-            fi
-            if [ $upload_type == "test-add-to-bucket" ]
+            elif [ $upload_type == "test-add-to-bucket" ]
             then
                 bucket_status=1
                 echo "creating file: $BUCKET_OK"
