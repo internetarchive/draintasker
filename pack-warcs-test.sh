@@ -172,6 +172,16 @@ then
     exit 0
   fi
 
+  # abort packing when less than 10 warcs and no FINISH_DRAIN
+  if [ ! -f $FINISH_DRAIN ]
+  then
+      if [ $total_num_warcs -lt $max_GB ]
+      then
+          echo "too few WARCs and FINISH_DRAIN file not found, exiting normally"
+          exit 0
+      fi
+  fi
+
   # lock this process
   if [ -e $open ]; then
     echo "OPEN file exists: $open"
