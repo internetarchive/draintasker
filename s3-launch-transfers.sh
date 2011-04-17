@@ -416,7 +416,7 @@ do
 	      aside="${blocker}.${retry_time}"
 	      if [ -f $blocker ]
 	      then
-		  echorun mv $blocker $aside | tee -a $OPEN
+		  echorun mv $blocker $aside
 	      fi
 	  done
       fi
