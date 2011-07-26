@@ -128,13 +128,10 @@ function set_date_range {
 }
 
 function echo_curl_output {
-    response_code=`echo $output | awk '{print $((NF-2))}'`
-    size_upload_bytes=`echo $output | awk '{print $((NF-1))}'`
-    total_time_seconds=`echo $output | awk '{print $NF}'`
     echo "http://${s3}/${bucket}/${filename}" | tee -a $TASK
-    echo "  response_code $response_code" | tee -a $TASK
-    echo "  size_upload_bytes $size_upload_bytes" | tee -a $TASK
-    echo "  total_time_seconds $total_time_seconds" | tee -a $TASK
+    echo "  response_code $1" | tee -a $TASK
+    echo "  size_upload_bytes $2" | tee -a $TASK
+    echo "  total_time_seconds $3" | tee -a $TASK
 }
 
 function write_success {
@@ -186,16 +183,20 @@ function verify_etag {
             echo "ERROR: bad ETag!"                   | tee -a $ERROR
             echo "  Content-MD5 request: '$checksum'" | tee -a $ERROR
             echo "  ETag response      : '$etag'"     | tee -a $ERROR
-            bad_etag=1
-            abort_series=1
+            #bad_etag=1
+            #abort_series=1
             exit 1
+	    return 1 # not reached
         else
             echo "ETag OK: $etag"
             echo "removing tmpfile: $tmpfile"
             rm $tmpfile
+	    return 0
         fi
     else
         echo "Warning: tmpfile not found:" $tmpfile
+	# assuming OK
+	return 0
     fi
 }
 
@@ -218,7 +219,7 @@ function schedule_retry {
     then
         echo $retry_epoch > $RETRY
     fi
-    abort_series=1
+    #abort_series=1
 }
 
 # 0 return code means curl succeeded
@@ -228,65 +229,61 @@ function schedule_retry {
 # /var/tmp/curl.out.$$ has the HTTP-header of the response
 
 function check_curl_success {
-    if [ $? == 0 ]
+    curl_status=$?
+    if [ $curl_status == 0 ]
     then
-        echo_curl_output
-        echo "curl finished with status: $?" | tee -a $OPEN
-        response_code=`echo $output | cut -d ' ' -f 1`
+        echo_curl_output $output
+        echo "curl finished with status: $curl_status" | tee -a $OPEN
+	response_code=${output/ */}
         if [ "$response_code" == "200" ] || [ "$response_code" == "201" ]
         then
     	    echo "SUCCESS: S3 PUT succeeded with response_code:"\
                  "$response_code" | tee -a $OPEN
-	    if [ $upload_type == "auto-make-bucket" ]
-            then
-                bucket_status=1
-            elif [ $upload_type == "test-add-to-bucket" ]
-            then
-                bucket_status=1
-                echo "creating file: $BUCKET_OK"
-                touch $BUCKET_OK
-            else
-		verify_etag
-		if [ $bad_etag -eq 0 ]
-                then
+	    case $upload_type in
+	    auto-make-bucket)
+		bucket_status=1;;
+	    test-add-to-bucket)
+		bucket_status=1
+		echo "creating file: $BUCKET_OK"
+	        touch $BUCKET_OK
+		;;
+	    *)
+		if verify_etag; then
                     write_tombstone
 		fi
-	    fi
+	    esac
             keep_trying='false'
         else
             (( retry_count++ ))
     	    echo "ERROR: S3 PUT failed with response_code:"\
-                 "$response_code at "`date +%Y-%m-%dT%T%Z`\
+                 "$response_code at $(date +%Y-%m-%dT%T%Z)" \
                  | tee -a $OPEN
-            if [ ${response_code} == "000" ] || [ ${response_code:0:1} == "4" ]
-            then
-		# curl failed with status 0! OR 4xx HTTP response
+	    case $response_code in
+	    000|4??|503)
 		if [ $retry_count -gt $max_block_count ]
-                then
+		then
 		    echo "RETRY count ($retry_count) "\
-                         "exceeds max_block_count: "\
-                         $max_block_count\
-                         | tee -a $OPEN
-                    schedule_retry
-                else
-                    echo "BLOCK: sleep for ${block_delay} seconds..."\
-                         | tee -a $OPEN
+			 "exceeds max_block_count: "\
+			 $max_block_count\
+			 | tee -a $OPEN
+		    schedule_retry
+		else
+		    echo "BLOCK: sleep for ${block_delay} seconds..."\
+			 | tee -a $OPEN
 		    sleep ${block_delay}
-		    echo "done sleeping at "`date +%Y-%m-%dT%T%Z`\
-                         | tee -a $OPEN
-                fi
-            elif [ ${response_code:0:1} == "5" ]
-            then
-                # 5xx HTTP response
-		schedule_retry
-            else
-                # un-handled HTTP response
-		schedule_retry
-            fi
+		    echo "done sleeping at $(date +%Y-%m-%dT%T%Z)" \
+			 | tee -a $OPEN
+		fi
+		;;
+	    5??)
+		schedule_retry;;
+	    *)
+		schedule_retry;;
+	    esac
         fi
     else
-        echo "ERROR: curl failed with status: $?" | tee -a $OPEN
-	echo_curl_output
+        echo "ERROR: curl failed with status: $curl_status" | tee -a $OPEN
+	echo_curl_output $output
         (( retry_count++ ))
 	schedule_retry
     fi
@@ -355,16 +352,16 @@ then
     exit 1
 else
     # validate configuration
-    $BIN/config.py $CONFIG
-    if [ $? != 0 ]
-    then
+    $BIN/config.py $CONFIG || {
 	echo "ERROR: invalid config: $CONFIG"
 	exit 1
-    fi
+    }
     xfer_job_dir=$($BIN/config.py $CONFIG xfer_dir)
 fi
 
-for d in $(find $xfer_job_dir -type d | sort)
+crawljob=$($BIN/config.py $CONFIG crawljob)
+compact_names=$($BIN/config.py $CONFIG compact_names)
+for d in $(find $xfer_job_dir -mindepth 1 -maxdepth 1 -type d | sort)
 do
   PACKED="$d/PACKED"
   MANIFEST="$d/MANIFEST"
@@ -380,59 +377,46 @@ do
   BUCKET_OK="$d/BUCKET_OK"
   tmpfile="/var/tmp/curl.out.$$"
 
-  warc_series=`echo $d | egrep -o '/([^/]*)$' | tr -d "/"`
+  #warc_series=`echo $d | egrep -o '/([^/]*)$' | tr -d "/"`
+  warc_series=$(basename $d)
   crawler=`echo $warc_series | awk -v FS=- '{print $NF}'`
   #crawler=`echo $warc_series | tr '-' ' ' | awk '{print $NF}'`
-  crawljob=`$BIN/config.py $CONFIG crawljob`
   crawldata="$d"
-  compact_names=`$BIN/config.py $CONFIG compact_names`
 
   # handle (5xx) RETRY file
   if [ -e $RETRY ]
   then
-      echo "  RETRY file exists: $RETRY ["`cat $RETRY`"]"\
-	   | tee -a $OPEN
-
-      now=`date +%s`
       retry_time=`cat $RETRY`
+      echo "RETRY file exists: $RETRY [${retry_time}]" | tee -a $OPEN
 
+      now=$(date +%s)
       if [ $now -lt $retry_time ]
       then
-	  echo "    RETRY delay (now=${now} < retry_time=$retry_time)"\
+	  echo "  RETRY delay (now=${now} < retry_time=$retry_time)"\
 	       | tee -a $OPEN
 	  echo "    skipping series: $warc_series" | tee -a $OPEN
 	  continue
       else
-	  echo "RETRY OK (now=$now > retry_time=$retry_time)"\
+	  echo "  RETRY OK (now=$now > retry_time=$retry_time)"\
 	       | tee -a $OPEN
-	  echo "moving aside RETRY file" | tee -a $OPEN
-	  #echo "mv $RETRY" | tee -a $OPEN
-	  #echo "   $RETRY.${retry_time}" | tee -a $OPEN
+	  echo "  moving aside RETRY file" | tee -a $OPEN
 	  echorun mv $RETRY $RETRY.${retry_time} | tee -a $OPEN
 
 	  echo "moving aside blocking files" | tee -a $OPEN
 	  for blocker in $OPEN $ERROR $TASK
 	  do
-	      aside="${blocker}.${retry_time}"
 	      if [ -f $blocker ]
 	      then
-		  echorun mv $blocker $aside
+		  echorun mv $blocker "${blocker}.${retry_time}"
 	      fi
 	  done
       fi
   fi
 
   # check for files locking this series
-  locking_files=($OPEN $ERROR $LAUNCH $TASK)
-  locking_keys=(LAUNCH.open ERROR LAUNCH TASK)
-  n_lock_files=${#locking_files[@]}
-  for (( l=0; l < n_lock_files ; l++ ))
-  do
-      lock=${locking_keys[$l]}
-      lock_file=${locking_files[$l]}
-      if [ -e $lock_file ]
-      then
-	  echo "$lock file exists: $lock_file"
+  for lock_file in $OPEN $ERROR $LAUNCH $TASK; do
+      if [ -e $lock_file ]; then
+	  echo "$(basename $lock_file) file exists: $lock_file"
 	  continue 2
       fi
   done
@@ -456,7 +440,6 @@ do
   # --------------------------------------------------------------
   echo "parsing MANIFEST:" | tee -a $OPEN
   echo "  $MANIFEST" | tee -a $OPEN
-  #num_warcs=0
   unset files
   for warc in $(awk '{print $2}' $MANIFEST)
   do
@@ -657,56 +640,49 @@ do
   keep_trying=true
   upload_type="auto-make-bucket"
   bucket_status=0
-  echo "Creating item: http://archive.org/details/${bucket}" | tee -a $OPEN
-  while $keep_trying # RETRY loop
-  do
-      echo "-----" | tee -a $OPEN
-      if [ -f "$BUCKET_OK" ]
-      then
-	  echo "BUCKET_OK exists, skipping $upload_type"
-	  keep_trying='false'
-	  bucket_status=1
-      else
-	  curl_s3
-      fi
-  done
-
-  # if auto-make-bucket has failed, do not try to upload warcs
-  if [ $bucket_status -eq 0 ]
-  then
-      echo "Create (auto-make-bucket) failed: $bucket" | tee -a $OPEN
-      echo "aborting series: $warc_series" | tee -a $OPEN
-      continue
+  if [ -f $BUCKET_OK ]; then
+      echo "BUCKET_OK exists, skipping $upload_type"
   else
-      echo "item/bucket created successfully: $bucket" | tee -a $OPEN
-      abort_series=0
-      bad_etag=0
-  fi
-
-  # 2) try uploading a small file to the new item first
-  # ----------------------------------------------------------------
-  filepath=$MANIFEST
-  filename=$(basename "$filepath").txt
-  retry_count=0
-  keep_trying=true
-  upload_type="test-add-to-bucket"
-  copts=(
-      "${common_opts[@]}"
-      "${noderive_opts[@]}"
-      --upload-file "${filepath}"
-  )
-  echo "Uploading $MANIFEST" | tee -a $OPEN
-  while $keep_trying # RETRY loop
-  do
-      echo "-----" | tee -a $OPEN
-      if [ -f "$BUCKET_OK" ]
-      then
-	  echo "BUCKET_OK exists, skipping $upload_type"
-	  keep_trying=false
-      else
+      echo "Creating item: http://archive.org/details/${bucket}" | tee -a $OPEN
+      while $keep_trying; do
+	  echo "-----" | tee -a $OPEN
 	  curl_s3
+	  # curl_s3 sets keep_trying to false for success
+      done
+      # if auto-make-bucket has failed, do not try to upload warcs
+      if [ $bucket_status -eq 0 ]; then
+	  echo "Create (auto-make-bucket) failed: $bucket" | tee -a $OPEN
+	  echo "aborting series: $warc_series" | tee -a $OPEN
+	  continue
       fi
-  done
+      echo "item/bucket created successfully: $bucket" | tee -a $OPEN
+  fi
+  #abort_series=0
+  #bad_etag=0
+
+  # 2) run HEAD on item URL to make sure item is ready
+  # item creation request above may be sitting in the queue for a while.
+  # ----------------------------------------------------------------
+  if [ -f $BUCKET_OK ]; then
+      echo "BUCKET_OK exists, skipping bucket check"
+  else
+      filename='' # makes request URL bucket name + '/'
+      retry_count=0
+      keep_trying=true
+      upload_type="test-add-to-bucket"
+      copts=(
+	  "${common_opts[@]}"
+	  --head
+      )
+      while $keep_trying; do
+	  echo "Checking if bucket ${bucket} exists" | tee -a $OPEN
+	  curl_s3
+      done
+      if [ -f $RETRY ]; then
+	  echo "Aborting warc_series: $warc_series" | tee -a $OPEN
+	  continue
+      fi
+  fi
 
   # 3) add WARCs to newly created item (upload-file)
   # ----------------------------------------------------------------
@@ -748,8 +724,9 @@ do
 	      curl_s3
 	  fi
 
-	  if [ $abort_series -eq 1 ]
-	  then
+	  #if [ $abort_series -eq 1 ]
+	  #then
+	  if [ -f $RETRY ]; then
 	       echo "Aborting warc_series: $warc_series" | tee -a $OPEN
 	       continue 3
 	  fi
@@ -768,13 +745,11 @@ do
 
   # unlock process
   echo "mv open file to LAUNCH: $LAUNCH"
-  mv $OPEN $LAUNCH
-  if [ $? != 0 ]
-  then
+  mv $OPEN $LAUNCH || {
     error_msg="ERROR: failed to mv $OPEN to $LAUNCH"
     echo $error_msg | tee -a $ERROR
     exit 4
-  fi
+  }
 
   (( launch_count++ ))
 

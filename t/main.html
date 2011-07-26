@@ -1,0 +1,170 @@
+{% set linkfile = lambda pj, ser, file: '<a href="files/%s/%s/%s">%s</a>' % (pj.id, ser.name, file, file) if file is not None else '&nbsp' %}
+{% set pstatus = lambda code: 'running' if code is None else 'exit %s' % code %}
+{% set nonone = lambda v: '' if v is None else v %}
+{% autoescape None %}
+<html>
+<head>
+<title>{{uname[1]}} - drain webadmin</title>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.5.1/jquery.js"></script>
+<style type="text/css">
+table { border-collapse:collapse; }
+tr.completed { background-color: #ddd; }
+tr.running { background-color: #dfd; }
+</style>
+</head>
+<body>
+<h1>Draining Admin</h1>
+{% for pj in projects %}
+  <div class="project" projectid="{{pj.id}}">
+  <h2>Project {{pj.id}} : {{pj.config_fname}}</h2>
+  <h3>Source : {{pj.confobj['job_dir']}}</h3>
+  {% set src = pj.source %}
+  {% if src.exists %}
+    <table border="1" cellpadding="3">
+      <tr>
+	<th>DRAINME</th>
+	<th>FINISH_DRAIN</th>
+	<th>Disk Space</th>
+	<th>WARCs</th>
+	<th>Packing</th>
+      </tr>
+      <tr>
+	<td><a href="#" onclick="drain({{pj.id}},{{int(not(src.drainme))}});return false;">{{src.drainme}}</a></td>
+	<td><a href="#" onclick="finishdrain({{pj.id}},{{int(not(src.finishdrain))}});return false;">{{src.finishdrain}}</a></td>
+	<td>{{'%.2fGB/%.2fGB' % (float(src.free)/(1024**3),float(src.total)/(1024**3))}}</td>
+	<td>{{src.warcs}} ({{'%.2fGB' % (float(src.warcs_size)/(1024**3),)}})</td>
+	<td id="packing">{{src.packing}}</td>
+      </tr>
+    </table>
+  {% end %}
+  <h3>Uploads</h3>
+  <table id="uploads" border="1">
+    <tr>
+      <th>name</th><th>warcs</th>
+      <th>PACKED</th><th>MANIFEST</th><th>LAUNCH</th>
+      <th>TASK</th><th>SUCCESS</th><th>ERROR</th><th>TOMBSTONE</th>
+      <th>RETRY</th>
+      <th></th>
+    </tr>
+  {% for s in pj.uploads() %}
+    <tr class="{{s.status}}">
+      <td><a href="http://www.archive.org/details/{{s.name}}">{{s.name}}</a></td>
+      <td>{{s.warcs}}/{{s.warcs_done}}</td>
+      <td>{{nonone(s.packed)}}</td>
+      <td>{% raw linkfile(pj,s,s.manifest) %}</td>
+      <td>{% raw linkfile(pj,s,s.launch) %}</td>
+      <td>{% raw linkfile(pj,s,s.task) %}</td>
+      <td>{{nonone(s.success)}}</td>
+      <td>{% raw linkfile(pj,s,s.error) %}</td>
+      <td>{{nonone(s.tombstone)}}</td>
+      <td>{{nonone(s.retry)}}</td>
+      {% if s.has_file('LAUNCH.open') %}
+        <td><button onclick="retryasap({{pj.id}},'{{s.name}}')">retry</button></td>
+      {% else %}
+	<td></td>
+      {% end %}
+    </tr>
+  {% end %}
+  </table>
+  <h3>Processes</h3>
+  <div>
+    <button id="startpackwarcs" onclick="startpackwarcs({{pj.id}})">start pack-warcs</button>
+    <button id="starttransfers" onclick="starttransfers({{pj.id}})">start launch-transfers</button>
+  </div>
+  <table id="processes" border="1">
+  <tr>
+    <th>Started</th><th>PID</th><th>Output</th><th>Status</th>
+  </tr>
+  {% for proc in pj.processes %}
+    <tr>
+      <td>{{proc.st and proc.st.strftime('%F %T')}}</td>
+      <td>{{proc.p.pid}}</td><td>{{proc.o.name}}</td>
+      <td>{{pstatus(proc.p.poll())}}</td>
+      <td>{{' '.join(proc.cmdline)}}</td>
+    </tr>
+  {% end %}
+  {% for proc in pj.get_dtprocesses() %}
+    <tr>
+      <td></td><td>{{proc.p.pid}}</td><td>{{proc.o and proc.o.name}}</td>
+      <td>running</td>
+      <td>{{' '.join(proc.cmdline)}}</td>
+    </tr>
+  {% end %}
+  </table>
+  <h3>Configuration</h3>
+  <table border="1" width="100%">
+  {% for k, v in pj.configitems() %}
+    <tr>
+    <td>{{k}}</td>
+    <td>{{v}}</td>
+    </tr>
+  {% end %}
+  </table>
+  </div>
+{% end %}
+<script type="text/javascript">
+function drain(pj,sw){
+  jQuery.ajax('drain', {
+    data:{pj:pj, sw:sw},
+    dataType:'json',
+  });
+}
+function finishdrain(pj,sw){
+  jQuery.ajax('finishdrain', {
+    data:{pj:pj, sw:sw},
+    dataType:'json',
+  });
+}
+function starttransfers(pj){
+  jQuery.ajax('starttransfers', {
+    data:{pj:pj},
+    dataType:'json',
+    success:function(data){
+      if (console && console.log) console.log(data);
+      if (!data.ok) {
+        alert('starttransfers failed:' + data.error);
+      }
+    }
+  });
+}
+function startpackwarcs(pj){
+  jQuery.ajax('startpackwarcs', {
+    data:{'pj':pj},
+    dataType:'json',
+    success:function(data){
+      if (console && console.log) console.log(data);
+      if (!data.ok) {
+        alert('startpackwarcs failed:' + data.error);
+      }
+    }
+  });
+}
+function retryasap(pj, series){
+  jQuery.ajax('retryasap', {
+    data:{pj:pj, s:series},
+    dataType:'json',
+    success:function(data){
+      if (console && console.log) console.log(data);
+      if (!data.ok) {
+        alert('retryasap failed: ' + data.error);
+      }
+    }
+  });
+}
+jQuery(document).ready(function(){
+  var comp = jQuery("tr.completed");
+  if (comp.length > 0) {
+    comp.hide();
+    var a = jQuery(document.createElement('a')).attr('href','#')
+      .html('show/hide '+comp.length+' completed serieses')
+      .click(function(ev){
+        ev.preventDefault();
+        jQuery('tr.completed').toggle(); });
+    jQuery('#uploads').before(a);
+  }
+  jQuery('#startpackwarcs').get(0).disabled =
+    (jQuery('#packing').text()=='True');
+});
+</script>
+</body>
+</html>

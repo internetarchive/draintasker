@@ -8,12 +8,11 @@ __author__ = "siznax 2010"
 
 import sys, os, pprint, re
 # svn co http://svn.pyyaml.org/pyyaml/trunk/ lib/pyamml
-sys.path[0:0] = (os.path.join(sys.path[0], 'lib'),)
-try:
-    import yaml
-except Exception as detail:
-    print "ERROR:", detail
-    sys.exit(1)
+#sys.path[0:0] = (os.path.join(sys.path[0], 'lib'),)
+if __name__ == '__main__':
+    libpath = os.path.join(os.path.dirname(__file__), 'lib')
+    if libpath not in sys.path: sys.path.append(libpath)
+import yaml
 
 MAX_ITEM_SIZE_GB = 10
 
@@ -90,7 +89,9 @@ def pprint_config(cfg):
 def load_config(fname):
     """ return config dict from YAML file """
     try:
-        cfg = yaml.load(open(fname))
+        f = open(fname)
+        cfg = yaml.load(f.read().decode('utf-8'))
+        f.close()
         return cfg
     except yaml.YAMLError, exc:
         print "Error parsing config:", exc
@@ -100,8 +101,8 @@ def get_config(fname):
     """ verify YAML filepath, return config dict"""
     if os.path.exists(fname) == False:
         sys.exit("ERROR: config file not found: " + fname)
-    elif fname[0] != "/":
-        sys.exit("ERROR: must give fullpath to config: " + fname)
+    # elif fname[0] != "/":
+    #     sys.exit("ERROR: must give fullpath to config: " + fname)
     else:
         return load_config(fname)
 
@@ -117,7 +118,3 @@ if __name__ == "__main__":
                 pprint_config(load_config(sys.argv[1]))
         if len(sys.argv) == 3:
             print get_param(sys.argv[1],sys.argv[2])
-            
-else:
-    """ on import """
-    # print "imported", __name__

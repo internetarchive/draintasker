@@ -185,14 +185,14 @@ if [ $force -ne 1 ]; then query_user; fi
 
 # look for DRAINME
 if [ ! -e $DRAINME ]; then
-  echo "DRAINME file not found, exiting."
+  echo $(basename $0) "DRAINME file not found, exiting."
   exit 0
 fi
 
-# abort packing when less than 10 warcs and no FINISH_DRAIN
+# abort packing when less than max_GB warcs and no FINISH_DRAIN
 if [ ! -f $FINISH_DRAIN ]; then
-  if [ $total_num_warcs -lt $max_GB ]; then
-    echo "too few WARCs and FINISH_DRAIN file not found, exiting normally"
+  if ((total_size_warcs < max_size)); then
+    echo $(basename $0) "too few WARCs and FINISH_DRAIN file not found, exiting normally"
     exit 0
   fi
 fi
