@@ -207,7 +207,7 @@ then
   # loop over warcs in job dir
   back=`pwd`
   cd $job_dir
-  for w in `find $job_dir\
+  for w in `find $job_dir/ \
       -maxdepth 1 \( -name \*.arc.gz -o -name \*.warc.gz \)\
       | sort`
   do 

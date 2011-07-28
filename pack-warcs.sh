@@ -220,7 +220,7 @@ mfiles=()  # manifest files array
 
 # loop over warcs in job dir
 cd $job_dir
-for w in `find $job_dir\
+for w in `find $job_dir/ \
     -maxdepth 1 \( -name \*.arc.gz -o -name \*.warc.gz \)\
     | sort`
 do 
