@@ -97,7 +97,6 @@ class Files(web.RequestHandler):
         except:
             self.send_error(404)
         xferdir = self.manager.projects[int(pj)].xfer_dir
-        self.set_header('content-type', 'text/plain')
         try:
             f = open(os.path.join(xferdir, path))
             while 1:
@@ -105,6 +104,7 @@ class Files(web.RequestHandler):
                 if not c: break
                 self.write(c)
             f.close()
+            self.set_header('Content-Type', 'text/plain')
         except:
             self.send_error(404)
 
