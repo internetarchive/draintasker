@@ -36,7 +36,7 @@ then
   total_rm_count=0
 
   # loop over warc_series
-  for d in `find $1 -type d`
+  for d in `find $1 -mindepth 1 -maxdepth 1 -type d`
   do
 
     warc_series=`echo $d | tr '/' ' ' | awk '{print $NF}'`
