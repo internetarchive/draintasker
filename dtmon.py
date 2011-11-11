@@ -4,7 +4,7 @@ Usage: dtmon.py config
   config = YAML file like dtmon.yml
 """
 __author__ = "siznax 2010"
-__version__ = "draintasker-2.2"
+__version__ = "2.3"
 
 # for man page, "pydoc dtmon"
 
@@ -71,6 +71,11 @@ def getdtprocesses(dtconf, excludes=[]):
             result.append(Storage(p=Storage(pid=pid), cmdline=cmdline,
                                   o=getstdout(pid), st=None))
         elif cmd == 'curl':
+            # drop "--header ..." arguments from cmdline - specifically
+            # the one containing auth token.
+            for i in range(len(cmdline) - 1, 0, -1):
+                if cmdline[i].startswith('--header '):
+                    cmdline.pop(i)
             result.append(Storage(p=Storage(pid=pid), cmdline=cmdline,
                                   o=getstdout(pid), st=None))
     return result
@@ -120,7 +125,7 @@ class Series(object):
         d = os.path.join(self.xfer, self.name)
         count = 0
         for fn in os.listdir(d):
-            if fn.endswith('.warc.gz') or fn.endswith('.warc'):
+            if re.match(r'.*\.w?arc(\.gz)?$', fn):
                 count += 1
         return count
 
@@ -387,7 +392,7 @@ class Project(object):
 # to be contained within iaupldr module
 class UpLoader:
 
-    def __init__(self, configs, sleep=600, home=None):
+    def __init__(self, configs, sleep=None, home=None):
         """ initialize configuration """
         self.name = os.path.basename(__file__)
         self.sleep = sleep
@@ -436,10 +441,14 @@ class UpLoader:
                     print "DRAINME file not found: ", pj.DRAINME
                 # old code that does not fit new multi-project support.
                 # sleep time would be removed from dtmon.cfg and smarter
-                # scheduling will be implemented.
-                print "sleeping %ds" % self.sleep
+                # scheduling will be implemented. for now, sleeping for
+                # sleep_time parameter in dtmon.cfg for the project
+                # (overridden by command line option), until we start
+                # using draintasker with multiple projects.
+                sleep_time = self.sleep or pj.sleep
+                print "sleeping %ds" % sleep_time
                 sys.stdout.flush()
-                time.sleep(self.sleep)
+                time.sleep(sleep_time)
 
 if __name__ == "__main__":
     from optparse import OptionParser
@@ -452,7 +461,7 @@ if __name__ == "__main__":
                    default=True)
     opt.add_option('-i', '--interval', action='store', dest='interval',
                    type='int', help='time in seconds to sleep between draining',
-                   default=600)
+                   default=None)
     options, args = opt.parse_args()
     if len(args) < 1:
         opt.print_help(sys.stderr)
