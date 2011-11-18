@@ -462,6 +462,11 @@ if __name__ == "__main__":
     opt.add_option('-i', '--interval', action='store', dest='interval',
                    type='int', help='time in seconds to sleep between draining',
                    default=None)
+    opt.add_option('-L', action='store', dest='logfile', default=None,
+                   help='after initial check, sends all output '
+                   ' (both stdout and stderr) of draintasker and all '
+                   ' its subprocesses to specified file.'
+                   ' if the file exists, output will be appended to it')
     options, args = opt.parse_args()
     if len(args) < 1:
         opt.print_help(sys.stderr)
@@ -478,6 +483,12 @@ if __name__ == "__main__":
         admin.Server(dt, options.port).start()
         #admin.Server([dict(dtconf=p) for p in configs],
         #             options.port, dt).start()
+    if options.logfile:
+        os.close(1)
+        assert os.open(options.logfile, os.O_WRONLY|os.O_CREAT) == 1
+        os.lseek(1, 0, 2)
+        os.close(2)
+        assert os.dup(1) == 2
     try:
         dt.run()
     except KeyboardInterrupt:
