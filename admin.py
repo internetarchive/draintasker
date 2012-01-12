@@ -86,7 +86,7 @@ class WebUI(web.RequestHandler):
         sw = self.get_argument('sw', '1')
         pj = self.manager.projects[pjid]
         pj.finishdrain((sw=='1'))
-        self.write(dict(pj=pj.id, sw=p.sw, ok=1))
+        self.write(dict(pj=pj.id, sw=sw, ok=1))
             
 class Files(web.RequestHandler):
     def initialize(self, manager):
