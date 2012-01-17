@@ -18,6 +18,10 @@ import subprocess
 import time
 from tempfile import NamedTemporaryFile
 from datetime import datetime
+try:
+    import pwd
+except:
+    pwd = None
 
 class Storage(object):
     def __init__(self, **kwds):
@@ -223,11 +227,23 @@ class Project(object):
         self.processes = []
         self.config_mtime = None
 
+        # set HOME environment variable from password database. .ias3cfg
+        # is read from HOME/.ias3cfg and it is very likely this file is
+        # unreadable if sudo is used to run draintasker.
+        if pwd:
+            # pwd module is available only on Unix platform
+            pw = pwd.getpwuid(os.geteuid())
+            if pw:
+                os.environ["HOME"] = pw.pw_dir
+
         # check if user has .ias3cfg - not used in Project,
         # but it is useful to give user an error in the early stage.
         self.ias3cfg = os.environ["HOME"]+ "/.ias3cfg" 
-        if not os.path.isfile(self.ias3cfg):
-            sys.exit("Error: ias3cfg file not found: "+self.ias3cfg)
+        try:
+            with open(self.ias3cfg, 'r'):
+                pass
+        except Exception as ex:
+            exit("Error: %s: %s" % (self.ias3cfg, ex.strerror))
 
     def is_config_updated(self):
         if self.config_mtime is None: return True
