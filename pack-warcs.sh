@@ -80,7 +80,7 @@ function set_warc_series_1 {
   crawler=`     echo $b | cut -d '-' -f 4`
   if (($compactify))
   then
-      echo "${prefix}-${timestamp:0:14}-${crawler}"
+      echo "${prefix}-${timestamp:0:14}$suffix-${crawler}"
   else
       echo "${prefix}-${timestamp}-${first_serial}"
   fi
@@ -95,7 +95,7 @@ function set_warc_series_2 {
   crawler=`     echo $b | cut -d '~' -f 2`
   if (($compactify))
   then
-      echo "${prefix}-${timestamp:0:14}-${crawler}"
+      echo "${prefix}-${timestamp:0:14}$suffix-${crawler}"
   else
       echo "${prefix}-${timestamp}-${first_serial}"
   fi
@@ -286,56 +286,52 @@ do
 
   ((series_count++))
 
-  warc_series=$($set_warc_series $(basename "${mfiles[0]}"))
+  suffix=''
+  # breaks when item directory is secured successfully
+  while true; do
+    warc_series=$($set_warc_series $(basename "${mfiles[0]}"))
 
-  last_serial=`echo "${mfiles[${#mfiles[@]}-1]}"\
-      | awk '{l=split($job_dir, a, "-"); printf(a[l-1]);}'`
-  # FIXME this results in two crawler name in warc_series
-  if ((!$compactify)); then
-      warc_series="${warc_series}-${last_serial}-${crawler}"
-  fi
-  pack_info="$warc_series ${#mfiles[@]} $msize"
+    last_serial=`echo "${mfiles[${#mfiles[@]}-1]}"\
+	| awk '{l=split($job_dir, a, "-"); printf(a[l-1]);}'`
+    # FIXME this results in two crawler name in warc_series
+    if ((!$compactify)); then
+	warc_series="${warc_series}-${last_serial}-${crawler}"
+    fi
+    pack_info="$warc_series ${#mfiles[@]} $msize"
 
-  xfer_dir="$xfer_home/${warc_series}"
+    echo "files considered for packing:" 
+    for ((i=0; i<${#mfiles[@]}; i++)); do
+	printf "%5s %s\n" [$i] ${mfiles[$i]}
+    done
 
-  echo "files considered for packing:" 
-  for ((i=0; i<${#mfiles[@]}; i++)); do
-      printf "%5s %s\n" [$i] ${mfiles[$i]}
+    echo
+    echo "WARNING: WARC naming may have changed, check series: $warc_series"
+    echo
+
+    echo "==== $pack_info  ====  "
+
+    # make xfer_dir
+    xfer_dir="$xfer_home/${warc_series}"
+    if [ -d $xfer_dir ]; then
+      echo "$xfer_dir exists"
+      if [ -f $xfer_dir/PACKED ]; then
+	if (($compactify)); then
+	  echo $xfer_dir_PACKED exists - item name conflict, adding suffix to resolve
+	  ((--suffix)) # sets "-1" to suffix when suffix==''
+	else
+	  echo $xfer_dir/PACKED exists - item name conflict, aborting
+	  exit 1
+	fi
+      fi
+    else
+      echo "mkdir -p $xfer_dir"
+      mkdir -p $xfer_dir || {
+	  echo "ERROR: mkdir failed: $xfer_dir"
+	  exit 1
+      }
+      break
+    fi
   done
-
-  echo
-  echo "WARNING: WARC naming may have changed, check series: $warc_series"
-  echo
-
-  echo "==== $pack_info  ====  "
-
-  # make xfer_home
-  if [ -d $xfer_home ]; then
-    echo "$xfer_home exists"
-  else
-    echo "mkdir $xfer_home"
-    mkdir $xfer_home
-    if [ $? != 0 ]; then
-	echo "ERROR: mkdir failed: $xfer_home"
-	exit 1
-    fi
-  fi
-
-  # make xfer_dir
-  if [ -d $xfer_dir ]; then
-    echo "$xfer_dir exists"
-    if [ -f $xfer_dir/PACKED ]; then
-      echo $xfer_dir/PACKED exists - item name conflict, aborting
-      exit 1
-    fi
-  else
-    echo "mkdir $xfer_dir"
-    mkdir $xfer_dir
-    if [ $? != 0 ]; then
-	echo "ERROR: mkdir failed: $xfer_dir"
-	exit 1
-    fi
-  fi
 
   # move files in this manifest
   for ((i=0;i<${#mfiles[@]};i++))
