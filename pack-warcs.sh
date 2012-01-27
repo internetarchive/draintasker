@@ -316,7 +316,7 @@ do
       echo "$xfer_dir exists"
       if [ -f $xfer_dir/PACKED ]; then
 	if (($compactify)); then
-	  echo $xfer_dir_PACKED exists - item name conflict, adding suffix to resolve
+	  echo $xfer_dir/PACKED exists - item name conflict, adding suffix to resolve
 	  ((--suffix)) # sets "-1" to suffix when suffix==''
 	else
 	  echo $xfer_dir/PACKED exists - item name conflict, aborting
