@@ -85,7 +85,8 @@ tr.running { background-color: #dfd; }
   {% end %}
   {% for proc in pj.get_dtprocesses() %}
     <tr>
-      <td></td><td>{{proc.p.pid}}</td><td>{{proc.o and proc.o.name}}</td>
+      <td>{{proc.st  and proc.st.strftime('%F %T')}}</td>
+      <td>{{proc.p.pid}}</td><td>{{proc.o and proc.o.name}}</td>
       <td>running</td>
       <td>{{' '.join(proc.cmdline)}}</td>
     </tr>

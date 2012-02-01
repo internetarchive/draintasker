@@ -51,6 +51,11 @@ def getpids(excludes=[]):
 def getdtprocesses(dtconf, excludes=[]):
     result = []
     for pid in getpids(excludes):
+        try:
+            mtime = os.stat(os.path.join('/proc', str(pid))).st_mtime
+            start_time = datetime.utcfromtimestamp(mtime)
+        except:
+            start_time = None
         cmdline = readfile(os.path.join('/proc', str(pid), 'cmdline'))\
             .split('\0')
         if cmdline[0]== '/bin/bash' or cmdline[0] == '/usr/bin/python':
@@ -58,30 +63,30 @@ def getdtprocesses(dtconf, excludes=[]):
         cmd = os.path.basename(cmdline[0])
         if cmd == 's3-drain-job.sh':
             result.append(Storage(p=Storage(pid=pid), cmdline=cmdline,
-                                  o=getstdout(pid), st=None))
+                                  o=getstdout(pid), st=start_time))
         elif cmd == 's3-launch-transfers.sh':
             result.append(Storage(p=Storage(pid=pid), cmdline=cmdline,
-                                  o=getstdout(pid), st=None))
+                                  o=getstdout(pid), st=start_time))
         elif cmd == 'dtmon.py':
             result.append(Storage(p=Storage(pid=pid), cmdline=cmdline,
-                                  o=getstdout(pid), st=None))
+                                  o=getstdout(pid), st=start_time))
         elif cmd == 'pack-warcs.sh':
             result.append(Storage(p=Storage(pid=pid), cmdline=cmdline,
-                                  o=getstdout(pid), st=None))
+                                  o=getstdout(pid), st=start_time))
         elif cmd == 's3-drain-job.sh':
             result.append(Storage(p=Storage(pid=pid), cmdline=cmdline,
-                                  o=getstdout(pid), st=None))
+                                  o=getstdout(pid), st=start_time))
         elif cmd == 'make-manifests.sh':
             result.append(Storage(p=Storage(pid=pid), cmdline=cmdline,
-                                  o=getstdout(pid), st=None))
+                                  o=getstdout(pid), st=start_time))
         elif cmd == 'curl':
             # drop "--header ..." arguments from cmdline - specifically
             # the one containing auth token.
-            for i in range(len(cmdline) - 1, 0, -1):
-                if cmdline[i].startswith('--header '):
-                    cmdline.pop(i)
+            for i in range(len(cmdline) - 2, 0, -1):
+                if cmdline[i] == '--header':
+                    cmdline[i:i+2] = ('*',)
             result.append(Storage(p=Storage(pid=pid), cmdline=cmdline,
-                                  o=getstdout(pid), st=None))
+                                  o=getstdout(pid), st=start_time))
     return result
 
 def getstdout(pid):
@@ -408,22 +413,25 @@ class Project(object):
 # to be contained within iaupldr module
 class UpLoader:
 
-    def __init__(self, configs, sleep=None, home=None):
+    def __init__(self, configs, sleep=None, home=None, prefix=''):
         """ initialize configuration """
         self.name = os.path.basename(__file__)
         self.sleep = sleep
         self.home = home
         if self.home is None:
             self.home = os.path.dirname(__file__)
-        self.DT_LAUNCH_TRANSFERS = os.path.join(self.home,
-                                                's3-launch-transfers.sh')
-        self.DT_PACK_WARCS = os.path.join(self.home, 'pack-warcs.sh')
-        self.DT_DRAIN_JOB = os.path.join(self.home, 's3-drain-job.sh')
+        self.prefix = prefix
+        self.DT_LAUNCH_TRANSFERS = self.__cmd('s3-launch-transfers.sh')
+        self.DT_PACK_WARCS = self.__cmd('pack-warcs.sh')
+        self.DT_DRAIN_JOB = self.__cmd('s3-drain-job.sh')
         self.projects = [Project(i, config, self) for i, config
                          in enumerate(configs)]
         #self.init_config(fname)
         for pj in self.projects:
             pj.loadconfig()
+
+    def __cmd(self, name):
+        return os.path.join(self.home, (self.prefix or '') + name)
 
     # def init_config(self,fname):
     #     """ initial config pass """
@@ -483,6 +491,10 @@ if __name__ == "__main__":
                    ' (both stdout and stderr) of draintasker and all '
                    ' its subprocesses to specified file.'
                    ' if the file exists, output will be appended to it')
+    opt.add_option('--prefix', dest='prefix',
+                   default=os.environ.get('DTMON_PREFIX', ''),
+                   help='string to prepend to each sub-command '
+                   '(intended for test/development aid)')
     options, args = opt.parse_args()
     if len(args) < 1:
         opt.print_help(sys.stderr)
@@ -492,7 +504,7 @@ if __name__ == "__main__":
     if os.path.isdir(configs[0]):
         exit('%s: is a directory' % args[0])
 
-    dt = UpLoader(configs, sleep=options.interval)
+    dt = UpLoader(configs, sleep=options.interval, prefix=options.prefix)
     # utils.reflect(dt)
     if options.run_http_server:
         import admin

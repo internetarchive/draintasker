@@ -70,7 +70,7 @@ class WebUI(web.RequestHandler):
                                c=(proc.p.poll() or 'running'),
                                a=proc.cmdline))
         for proc in pj.get_dtprocesses():
-            result.append(dict(st=None, pid=proc.p.pid, o=None,
+            result.append(dict(st=proc.st, pid=proc.p.pid, o=None,
                                c='running',
                                a=proc.cmdline))
         self.write(result)
