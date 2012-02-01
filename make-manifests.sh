@@ -44,7 +44,7 @@ for d in $(find $1 -mindepth 1 -maxdepth 1 -type d | sort); do
   MANIFEST="$d/MANIFEST"
 
   if [ -e "$MANIFEST" ]; then
-    echo "MANIFEST exists: $MANIFEST"
+    #echo "MANIFEST exists: $MANIFEST"
     continue
   fi
   if [ -e "$OPEN" ]; then
