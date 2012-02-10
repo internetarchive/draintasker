@@ -38,12 +38,12 @@ xfer_job_dir=$1
 total_rm_count=0
 
 # loop over warc_series
-for d in `find $1 -mindepth 1 -maxdepth 1 -type d`; do
+for d in $(find $1 -mindepth 1 -maxdepth 1 -type d); do
 
   warc_series=$(basename $d)
   TOMBSTONE="$d/TOMBSTONE"
   MANIFEST="$d/MANIFEST"
-  CLEAN_ERR="$d/CLEAN.ERR"
+  CLEAN_ERR="$d/CLEAN.err"
 
   if [ -e $CLEAN_ERR ]; then
       echo "$CLEAN_ERR exists - skipping"
@@ -51,13 +51,8 @@ for d in `find $1 -mindepth 1 -maxdepth 1 -type d`; do
   fi
 
   # count original warcs in series
-  orig_warcs=`find $d \( -name \*.warc.gz -o -name \*.arc.gz \)`
-  if [ -n "$orig_warcs" ]
-  then
-    warc_count=`echo $orig_warcs | tr " " "\n" | wc -l`
-  else
-    warc_count=0
-  fi
+  orig_warcs=($(find $d -type f -regex '.*\.w?arc\(\.gz\)?$'))
+  warc_count=${#orig_warcs[@]}
 
   # check for TOMBSTONE
   if [ -e $TOMBSTONE ]; then
@@ -67,8 +62,7 @@ for d in `find $1 -mindepth 1 -maxdepth 1 -type d`; do
     manifest_count=$(wc -l < $MANIFEST)
 
     # check manifest, tombstone count
-    if [ ! $tombstone_count -eq $manifest_count ]
-    then
+    if [[ $tombstone_count != $manifest_count ]]; then
       echo "ERROR: count mis-match:"\
 	   "TOMBSTONE=$tombstone_count "\
 	   "MANIFEST=$manifest_count "\
@@ -76,11 +70,11 @@ for d in `find $1 -mindepth 1 -maxdepth 1 -type d`; do
       continue
     fi
 
-    if [ $warc_count == 0 ]; then
+    if [[ $warc_count == 0 ]]; then
       continue
-    else
-      echo "found ($warc_count) warcs in: $d"
     fi
+	
+    echo "found ($warc_count) warcs in: $d"
 
     echo "  tombstone_count: $tombstone_count"
     echo "  manifest_count: $manifest_count"
@@ -91,25 +85,21 @@ for d in `find $1 -mindepth 1 -maxdepth 1 -type d`; do
     if [ -z "$2" ]; then query_user; fi
 
     rm_warc_count=0
-    for w in $orig_warcs; do
-      orig_warc_str=$(basename $w)
+    for w in ${orig_warcs[@]}; do
       t="${w}.tombstone"
-      warc_tombstone_str=$(basename $t)
       if [ -e $t ]; then
-	echo "+ warc_tombstone: $warc_tombstone_str"
-	echo "  "`cat $t`
-	echo "  original_warc: $orig_warc_str"
+	echo "+ warc_tombstone: $(basename $t)"
+	echo "  "$(cat $t)
+	echo "  original_warc: $(basename $w)"
 	echo "  rm $w"
 	if [ ! -w $w ]; then
 	  echo "ERROR: file not writable: $w";
 	  continue
-	else
-	  rm $w
 	fi
-	if [ $? != 0 ]; then
-	  echo "ERROR: could not rm file: $w $?" | tee -a $CLEAN_ERR
-	  exit 3
-	fi
+	rm $w || {
+	    echo "ERROR: could not rm file: $w $?" | tee -a $CLEAN_ERR
+	    exit 3
+	}
       fi
       (( rm_warc_count++ ))
     done

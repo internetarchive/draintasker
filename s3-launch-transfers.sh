@@ -44,6 +44,11 @@ BIN=$(dirname $PG)
 usage="config [force] [mode=single]"
 
 : ${TEST:=false}
+if $TEST; then
+    CURL=curl_fake
+else
+    CURL=curl
+fi
 s3='s3.us.archive.org'
 dl='www.archive.org/download'
 std_warc_size=$(( 1024*1024*1024 )) # 1 gibibyte
@@ -62,71 +67,108 @@ function echorun {
     echo "$*"
     "$@"
 }
+
+function parse_warc_name {
+  local re=$(sed -e 's/{[^}]*}/(.*)/g' <<<"$WARC_NAME_PATTERN")
+  local names=($(sed -e 's/[^}]*{\([^}]*\)}[^{]*/\1 /g' <<<"$WARC_NAME_PATTERN") ext gz)
+
+  if [[ "$1" =~ ^$re(\.w?arc(\.gz)?)$ ]]; then
+    read ${names[@]/#/$2} <<<"${BASH_REMATCH[@]:1}"
+  else
+    return 1
+  fi
+}
+
 function set_tHR { # human-readable date format
-    tHR=`date -d "${t:0:4}-${t:4:2}-${t:6:2} ${t:8:2}:${t:10:2}:${t:12:2}"`
+    local t=$1
+    date -d "${t:0:4}-${t:4:2}-${t:6:2} ${t:8:2}:${t:10:2}:${t:12:2}"
 }
 
 # ISO 8601 date format
 function set_tISO {
-    # tISO=`echo ${t:0:4}-${t:4:2}-${t:6:2}T${t:8:2}:${t:10:2}:${t:12:2}Z`
-    tISO=`date +%Y-%m-%dT%T%Z -d "${t:0:4}-${t:4:2}-${t:6:2} ${t:8:2}:${t:10:2}:${t:12:2}"`
+    local t=$1
+    date +%Y-%m-%dT%T%Z -d "${t:0:4}-${t:4:2}-${t:6:2} ${t:8:2}:${t:10:2}:${t:12:2}"
 }
 
 # we could do something more sophisticated here
 # for more human readable date ranges
 function set_date_range {
+    local t=$(parse_warc_name "$(basename "$1")"; echo $timestamp)
+    first_file_date="$t"
+    start_date_ISO="$(set_tISO "$t")"
+    start_date_HR="$(set_tHR "$t")"
 
-    # get warc start date
-    first_file=`echo ${files[0]} | tr '/' ' ' | awk '{print $NF}'`
-    if [ $compact_names == 1 ]
-    then
-        t=`echo $files[0] | cut -d '-' -f 2`
-    else
-        t=`echo $files[0] | cut -d '-' -f 2 | grep -o "[0-9]\{17\}"`
-    fi
-    first_file_date=$t
-    set_tISO
-    start_date_ISO=${tISO}
-    set_tHR
-    start_date_HR=${tHR}
+    # # get warc start date
+    # first_file=`echo ${files[0]} | tr '/' ' ' | awk '{print $NF}'`
+    # if [ $compact_names == 1 ]
+    # then
+    #     t=`echo $files[0] | cut -d '-' -f 2`
+    # else
+    #     t=`echo $files[0] | cut -d '-' -f 2 | grep -o "[0-9]\{14,17\}"`000
+    # 	t=${t:0:17}
+    # fi
+    # first_file_date=$t
+    # set_tISO
+    # start_date_ISO=${tISO}
+    # set_tHR
+    # start_date_HR=${tHR}
 
     scandate=${t:0:14}
     metadate=${t:0:4}
     
     # get dates from last file in series
-    if [ ${#files[@]} -gt 1 ]
-    then
-        last_file=`echo "${files[@]:$((${#files[@]}-1))}"\
-                   | tr '/' ' ' | awk '{print $NF}'`
-        if [ $compact_names == 1 ]
-        then
-            t=`echo $last_file | cut -d '-' -f 2 | grep -o "[0-9]\{14\}"`
-        else
-            t=`echo $last_file | cut -d '-' -f 2 | grep -o "[0-9]\{17\}"`
-        fi
-        last_file_date=$t
-        # warc end date (from last file mtime). should (closely) 
-        # correspond to time of last record in series
-        t=`stat --format=%x "${files[@]:$((${#files[@]}-1))}"\
-          | cut -d '.' -f 1\
-          | tr  -d '-'\
-          | tr  -d ' '\
-          | tr  -d ':'`
-        last_date=${t:0:14}
-        set_tISO
-        end_date_ISO=${tISO}
-        set_tHR
-        end_date_HR=${tHR}
-    fi
+    last_file_date=$(parse_warc_name $(basename "$2"); echo $timestamp)
 
-    if [ -z $end_date_ISO ]
-    then
-        date_range=${start_date_ISO}
-    else
-        date_range="${start_date_ISO} to ${end_date_ISO}"
-    fi
+    # warc end date (from last file mtime). should (closely) 
+    # correspond to time of last record in series
+    local t=$(date +%Y%m%d%H%M%S -d @"$(stat -c %Y "$2")")
+    last_date=$t
+    end_date_ISO="$(set_tISO "$t")"
+    end_date_HR="$(set_tHR "$t")"
+    
+    # if [ ${#files[@]} -gt 1 ]; then
+    # 	last_file=${files[${#files[@]}-1]}
+    #     #last_file=`echo "${files[@]:$((${#files[@]}-1))}"\
+    #     #           | tr '/' ' ' | awk '{print $NF}'`
+    # 	t=
+    #     # if [ $compact_names == 1 ]
+    #     # then
+    #     #     t=`echo $last_file | cut -d '-' -f 2 | grep -o "[0-9]\{14\}"`
+    #     # else
+    #     #     t=`echo $last_file | cut -d '-' -f 2 | grep -o "[0-9]\{14,17\}"`000
+    # 	#     t=${t:0:17}
+    #     # fi
+    #     last_file_date=$t
+    #     # warc end date (from last file mtime). should (closely) 
+    #     # correspond to time of last record in series
+    #     # t=`stat --format=%x "${files[@]:$((${#files[@]}-1))}"\
+    #     #   | cut -d '.' -f 1\
+    #     #   | tr  -d '-'\
+    #     #   | tr  -d ' '\
+    #     #   | tr  -d ':'`
+    # 	t=$(date +%Y%m%d%H%M%S -d @"$(stat -c %Y "$last_file")")
+    # 	last_date=$t
+    # 	end_date_ISO="$(set_tISO "$t")"
+    # 	end_date_HR="$(set_tHR "$t")"
+    # fi
+
+    # if [ -z $end_date_ISO ]
+    # then
+    #     date_range=${start_date_ISO}
+    # else
+    #     date_range="${start_date_ISO} to ${end_date_ISO}"
+    # fi
+    date_range="${start_date_ISO} to ${end_date_ISO}"
 }
 
+function warc_software {
+    cat=cat
+    if [[ $1 =~ \.gz$ ]]; then
+	cat=zcat
+    fi
+    $cat $1 2>/dev/null | awk '/^software:/{ print $2 } NR>1&&/^WARC[/]/{ exit }'
+}
+	
 function echo_curl_output {
     echo "http://${s3}/${bucket}/${filename}" | tee -a $TASK
     echo "  response_code $1" | tee -a $TASK
@@ -222,6 +264,13 @@ function schedule_retry {
     #abort_series=1
 }
 
+function curl_fake {
+    printf '\n>>> THIS IS ONLY A TEST!<<<\n\n' >&2
+    sleep 10
+    # [response_code] [size_upload] [time_total]
+    echo "200 000 000"
+}
+
 # 0 return code means curl succeeded
 # 201 response_code means S3 succeeded
 # output has the format:
@@ -295,31 +344,19 @@ function curl_s3 {
         echo "RETRY attempt (${retry_count})" `date` | tee -a $OPEN
     fi
     curl_cmd=(
-	curl -vv "${copts[@]}"
+	$CURL -vv "${copts[@]}"
 	http://${s3}/${bucket}/${filename}
 	-o "$tmpfile"
     )
     echo "${curl_cmd[*]}" \
-      | sed -e 's/--header/\n  --header/g'\
-      | sed -e 's/--write-out/\n  --write-out/g'\
-      | sed -e 's/--upload-file/\n  --upload-file/g'\
-      | sed -e 's/ http/\n  http/'\
-      | sed -e 's/warc.gz,/warc.gz,\n    /g'\
-      | sed -e 's/-o /\n  -o /'\
+      | sed -e 's/--\(header\|write-out\|upload-file\)/\n  &/g'\
+            -e 's/ http/\n  &/'\
+            -e 's/w\?arc\(.gz\)\?,/&\n    /g'\
+            -e 's/-o /\n  &/'\
       | tee -a $OPEN
 
-    if $TEST
-    then
-	printf '\n>>> THIS IS ONLY A TEST!<<<\n\n' | tee -a $OPEN
-	sleep 10
-        # [response_code] [size_upload] [time_total]
-	output="000 000 000"
-	# curl blah
-        check_curl_success
-    else
-	output=$("${curl_cmd[@]}")
-	check_curl_success
-    fi
+    output=$("${curl_cmd[@]}")
+    check_curl_success
 }
 
 ################################################################
@@ -342,25 +379,33 @@ echo $(basename $0) $(date)
 
 S3CFG=$HOME/.ias3cfg
 
-if [ ! -f $CONFIG ] && [ ! -f $S3CFG ]
-then
-    echo "ERROR: config or s3cfg not found"
+if [ ! -f $CONFIG ]; then
+    echo "ERROR: config not found: $CONFIG"
     exit 1
-elif [ ${CONFIG:0:1} != '/' ]
-then
-    echo "ERROR: must give fullpath for config: $CONFIG"
-    exit 1
-else
-    # validate configuration
-    $BIN/config.py $CONFIG || {
-	echo "ERROR: invalid config: $CONFIG"
-	exit 1
-    }
-    xfer_job_dir=$($BIN/config.py $CONFIG xfer_dir)
 fi
+if [ ! -f $S3CFG ]; then
+    echo "ERROR: s3cfg not found: $S3CFG"
+    exit 1
+fi
+# validate configuration
+$BIN/config.py $CONFIG || {
+    echo "ERROR: invalid config: $CONFIG"
+    exit 1
+}
+xfer_job_dir=$($BIN/config.py $CONFIG xfer_dir)
 
 crawljob=$($BIN/config.py $CONFIG crawljob)
 compact_names=$($BIN/config.py $CONFIG compact_names)
+warc_naming=$($BIN/config.py $CONFIG WARC_naming)
+if ((compact_names)); then
+    WARC_NAME_PATTERN='{prefix}-{timestamp}-{serial}'
+else
+    if ((warc_naming==1)); then
+	WARC_NAME_PATTERN='{prefix}-{timestamp}-{serial}-{host}'
+    else
+	WARC_NAME_PATTERN='{prefix}-{timestamp}-{serial}-{pid}~{host}~{port}'
+    fi
+fi
 for d in $(find $xfer_job_dir -mindepth 1 -maxdepth 1 -type d | sort)
 do
   PACKED="$d/PACKED"
@@ -463,8 +508,7 @@ do
   echo "  nfiles_manifest = ${nfiles_manifest}" | tee -a $OPEN
   echo "  nfiles_found = ${nfiles_found}" | tee -a $OPEN
 
-  if [ ${nfiles_manifest} -ne ${nfiles_found} ]
-  then
+  if [ ${nfiles_manifest} -ne ${nfiles_found} ]; then
       echo "ERROR: count mis-match:"\
 	   "nfiles_manifest=${nfiles_manifest} vs"\
 	   "nfiles_found=${nfiles_found}"\
@@ -472,9 +516,15 @@ do
       echo "Aborting!" | tee -a $OPEN
       cp $OPEN $ERROR
       exit 2
-  else
-      set_date_range
   fi
+
+  first_file=${files[0]}
+  last_file=${files[${#files[@]}-1]}
+
+  # sets first_file_date, start_date_ISO, start_date_HR, scandate,
+  # metadate, last_file_date, last_date, end_date_ISO, end_date_HR
+  # and date_range
+  set_date_range "$first_file" "$last_file"
 
   # get keys
   access_key=`grep access_key $S3CFG | awk '{print $3}'`
@@ -488,8 +538,8 @@ do
   retry_delay=`$BIN/config.py $CONFIG retry_delay`
 
   # parse series
-  ws_date=`echo $warc_series | cut -d '-' -f 2`
-  cdate=`echo ${ws_date:0:6}`
+  #ws_date=`echo $warc_series | cut -d '-' -f 2`
+  #cdate=`echo ${ws_date:0:6}`
 
   # bucket metadata
   bucket="${warc_series}${test_suffix}"
@@ -500,16 +550,18 @@ do
 
   num_warcs=${nfiles_manifest}
   size_hint=`cat $PACKED | awk '{print $NF}'`
-  if [ $compact_names == 1 ]
-  then
-      first_serial=`echo $first_file\
-	| cut -d '-' -f 3 | sed -e 's/.warc.gz//'`
-      last_serial=` echo $last_file\
-	| cut -d '-' -f 3 | sed -e 's/.warc.gz//'`
-  else
-      first_serial=`echo $warc_series | cut -d '-' -f 3`
-      last_serial=` echo $warc_series | cut -d '-' -f 4`
-  fi
+  first_serial=$(parse_warc_name "$(basename "$first_file")"; echo $serial)
+  last_serial=$(parse_warc_name "$(basename "$last_file")"; echo $serial)
+  # if [ $compact_names == 1 ]
+  # then
+  #     first_serial=`echo $first_file\
+  # 	| cut -d '-' -f 3 | sed -e 's/.warc.gz//'`
+  #     last_serial=` echo $last_file\
+  # 	| cut -d '-' -f 3 | sed -e 's/.warc.gz//'`
+  # else
+  #     first_serial=`echo $warc_series | cut -d '-' -f 3`
+  #     last_serial=` echo $warc_series | cut -d '-' -f 4`
+  # fi
 
   # metadata per BK, intended to be like books
   #   Subject: metadata for the web stuff going into the paired archive
@@ -523,8 +575,7 @@ do
   operator=`$BIN/config.py $CONFIG operator`
   scancenter=`$BIN/config.py $CONFIG scanningcenter`
   access="http://www.archive.org/details/${bucket}"
-  crawler_version=`zcat ${files[0]} | head | grep software\
-    | awk '{print $2}'`
+  crawler_version=$(warc_software ${files[0]})
   description=`$BIN/config.py $CONFIG description\
     | sed -e s/CRAWLHOST/$scanner/\
       -e s/CRAWLJOB/$crawljob/\

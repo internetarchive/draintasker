@@ -60,7 +60,7 @@ for d in $(find $1 -mindepth 1 -maxdepth 1 -type d | sort); do
       echo "ERROR could not lock $OPEN"
       exit 1
     }
-    for f in $(ls *.{arc,warc}.gz 2>/dev/null); do
+    for f in $(ls *.{arc,warc,arc.gz,warc.gz} 2>/dev/null); do
       (( warc_count++ ))
       echo "  md5sum $(basename $f) >> $OPEN"
       md5sum $f >&100 || {

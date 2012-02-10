@@ -17,77 +17,70 @@
 #
 # siznax 2010
 
+PG=$0; test -h $PG && PG=$(readlink $PG)
+BIN=$(dirname $PG)
+
 usage="config"
 
-if [ -f "$1" ]
-then
-
-  CONFIG=$1
-  job_dir=`./config.py $CONFIG job_dir`
-  xfer_job_dir=`./config.py $CONFIG xfer_dir`
-  max_size=`./config.py $CONFIG max_size`
-  warc_naming=`./config.py $CONFIG WARC_naming`
-  compactify=`./config.py $CONFIG compact_names`
-
-  # DEBUG
-  # echo "  CONFIG       $CONFIG      "
-  # echo "  job_dir      $job_dir     "
-  # echo "  xfer_job_dir $xfer_job_dir"
-  # echo "  max_size     $max_size    "
-  # echo "  warc_naming  $warc_naming "
-  # echo "  compactify   $compactify  "
-  # exit 99
-
-  echo `basename $0` `date`
-
-  if [ -e $job_dir ] 
-  then
-
-    # check for xfer_job_dir
-    if [ ! -e $xfer_job_dir ]
-    then 
-      echo "ERROR: xfer_job_dir not found: $xfer_job_dir" 
-    fi
-
-    # pack a single series
-    ./pack-warcs.sh $job_dir $xfer_job_dir $max_size\
-        $warc_naming 1 single $compactify
-    if [ $? != 0 ]
-    then
-      echo "ERROR packing warcs: $?"
-      exit 1
-    fi
-
-    # make a single manifest
-    ./make-manifests.sh $xfer_job_dir single
-    if [ $? != 0 ]
-    then
-      echo "ERROR making manifests: $?"
-      exit 1
-    fi
-
-    # launch a single task
-    ./s3-launch-transfers.sh $CONFIG 1 single
-    if [ $? != 0 ]
-    then
-      echo "ERROR launching transfers: $?"
-      exit 1
-    fi
-
-    # delete verified warcs
-    ./delete-verified-warcs.sh $xfer_job_dir 1
-    if [ $? != 0 ]
-    then
-      echo "ERROR deleting warcs: $?"
-      exit 1
-    fi
-
-  else
-    echo "ERROR: job_dir not found: $job_dir"
-    exit 1
-  fi
-else
-  echo "Usage:" `basename $0` $usage
+if [ -z "$1" ]; then
+  echo Usage: $(basename $0) $usage
   exit 1
 fi
-echo `basename $0` "done." `date`
+CONFIG=$1
+if [ ! -f $CONFIG ]; then
+  echo config file not found: $CONFIG
+  exit 1
+fi
+
+job_dir=`$BIN/config.py $CONFIG job_dir`
+xfer_job_dir=`$BIN/config.py $CONFIG xfer_dir`
+max_size=`$BIN/config.py $CONFIG max_size`
+warc_naming=`$BIN/config.py $CONFIG WARC_naming`
+compactify=`$BIN/config.py $CONFIG compact_names`
+
+# DEBUG
+# echo "  CONFIG       $CONFIG      "
+# echo "  job_dir      $job_dir     "
+# echo "  xfer_job_dir $xfer_job_dir"
+# echo "  max_size     $max_size    "
+# echo "  warc_naming  $warc_naming "
+# echo "  compactify   $compactify  "
+# exit 99
+
+echo $(basename $0) $(date)
+
+# bunch of prerequisites
+if [ ! -e $job_dir ]; then
+  echo "ERROR: job_dir not found: $job_dir"
+  exit 1
+fi
+if [ ! -e $xfer_job_dir ]; then
+  echo "ERROR: xfer_job_dir not found: $xfer_job_dir"
+  exit 1
+fi
+
+# pack a single series
+$BIN/pack-warcs.sh $job_dir $xfer_job_dir $max_size\
+    $warc_naming 1 single $compactify || {
+  echo "ERROR packing warcs: $?"
+  exit 1
+}
+# make a single manifest
+$BIN/make-manifests.sh $xfer_job_dir single || {
+  echo "ERROR making manifests: $?"
+  exit 1
+}
+
+# launch a single task
+$BIN/s3-launch-transfers.sh $CONFIG 1 single || {
+  echo "ERROR launching transfers: $?"
+  exit 1
+}
+
+# delete verified warcs
+$BIN/delete-verified-warcs.sh $xfer_job_dir 1 || {
+  echo "ERROR deleting warcs: $?"
+  exit 1
+}
+
+echo $(basename $0) "done." $(date)

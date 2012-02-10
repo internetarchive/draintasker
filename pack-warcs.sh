@@ -18,7 +18,6 @@
 #
 # PREREQUISITES
 #
-#   DRAINME      /{job_dir}/DRAINME
 #   FINISH_DRAIN /{job_dir}/FINISH_DRAIN
 #                (optional, for finish draining)
 #
@@ -32,6 +31,9 @@
 #                crawler   crawl host from warc filename
 #   PACKED       /{xfer_dir}/{warc_series}/PACKED
 #
+# NB: existence of DRAINME is no longer a prerequisite. it is now checked
+# by dtmon.py (i.e. it now controls "automatic" draining only.)
+#
 # siznax 2009
 
 PG=$0; test -h $PG && PG=$(readlink $PG)
@@ -42,7 +44,7 @@ usage[1]="[force] [mode=single] [compactify=0]"
 
 function unlock_job_dir {
   if [ -f $open ]; then
-    echo "removing OPEN file: $open"
+    echo "removing $open"
     rm $open || {
       echo "could not remove OPEN file: $open"
       exit 1
@@ -59,45 +61,34 @@ function query_user {
   fi
 }
 
-function compactify_target {
-  # should be warc_naming_1 and 2 safe
-  mv_prefix=`   echo $1 | cut -d '-' -f 1`
-  mv_timestamp=`echo $1 | cut -d '-' -f 2`
-  mv_serial=`   echo $1 | cut -d '-' -f 3`
-  mv_ext=`      echo $1 | tr '.' ' ' | awk '{print $((NF-1))"."$NF}'`
-  echo "$xfer_dir/${mv_prefix}-${mv_timestamp:0:14}-${mv_serial}.${mv_ext}"
-  unset mv_prefix
-  unset mv_timestamp
-  unset mv_serial
-}
+# parse_warc_name WARC-NAME VAR_PREFIX
+# decompose WARC-NAME according to WARC_NAME_PATTERN and stores
+# each component into variable ${VAR_PREFIX}COMPONENT
+function parse_warc_name {
+  local re=$(sed -e 's/{[^}]*}/(.*)/g' <<<"$WARC_NAME_PATTERN")
+  local names=($(sed -e 's/[^}]*{\([^}]*\)}[^{]*/\1 /g' <<<"$WARC_NAME_PATTERN") ext gz)
 
-# {TLA}-{timestamp}-{serial}-{fqdn}.warc.gz
-function set_warc_series_1 {
-  b=`           echo $1 | cut -d '.' -f 1`
-  prefix=`      echo $b | cut -d '-' -f 1`
-  timestamp=`   echo $b | cut -d '-' -f 2`
-  first_serial=`echo $b | cut -d '-' -f 3`
-  crawler=`     echo $b | cut -d '-' -f 4`
-  if (($compactify))
-  then
-      echo "${prefix}-${timestamp:0:14}$suffix-${crawler}"
+  if [[ "$1" =~ ^$re(\.w?arc(\.gz)?)$ ]]; then
+    read ${names[@]/#/$2} <<<"${BASH_REMATCH[@]:1}"
+    # host name without domain part
+    eval ${2}shost='$( cut -d . -f 1 <<<"$'$2'host" )'
   else
-      echo "${prefix}-${timestamp}-${first_serial}"
+    return 1
   fi
 }
 
-# {TLA}-{timestamp}-{serial}-{PID}~{fqdn}~{port}.warc.gz
-function set_warc_series_2 {
-  b=`           echo $1 | cut -d '.' -f 1`
-  prefix=`      echo $b | cut -d '-' -f 1`
-  timestamp=`   echo $b | cut -d '-' -f 2`
-  first_serial=`echo $b | cut -d '-' -f 3`
-  crawler=`     echo $b | cut -d '~' -f 2`
-  if (($compactify))
-  then
-      echo "${prefix}-${timestamp:0:14}$suffix-${crawler}"
+function compactify_target {
+  parse_warc_name "$1" mv_
+  echo "${mv_prefix}-${mv_timestamp:0:14}-${mv_serial}${mv_ext}"
+}
+
+function make_item_name {
+  parse_warc_name "$1" f_
+  if ((compactify)); then
+    echo "${f_prefix}-${f_timestamp:0:14}${f_suffix}-${f_shost}"
   else
-      echo "${prefix}-${timestamp}-${first_serial}"
+    parse_warc_name "$2" l_
+    echo "${f_prefix}-${f_timestamp}-${f_serial}-${l_serial}-${f_shost}"
   fi
 }
 
@@ -107,7 +98,7 @@ function report_done {
          "$valid_count validated"\
          "$pack_count packed"\
          "$series_count series"
-    echo `basename $0` "Done." `date`
+    echo $(basename $0) done. $(date)
 }
 
 ################################################################
@@ -121,31 +112,26 @@ job_dir=$1
 xfer_home=$2
 max_GB=$3  
 warc_naming=$4
-force=$5
-mode=$6
-compactify=$7
-
-if [ -z $force ]; then force=0; fi
-if [ -z $mode  ]; then mode=0; fi
-if [ -z $compactify ]; then compactify=0; fi
+force=${5:-0}
+mode=${6:-0}
+compactify=${7:-0}
 
 echo `basename $0` `date`
 
-if [ ! -d $job_dir ]
-then
+if [ ! -d $job_dir ]; then
   echo "ERROR: job_dir not found: $job_dir"
   exit 1
 fi
 if [ $warc_naming = 1 ]; then
-  set_warc_series=set_warc_series_1
+  WARC_NAME_PATTERN='{prefix}-{timestamp}-{serial}-{host}'
 else
-  set_warc_series=set_warc_series_2
+  WARC_NAME_PATTERN='{prefix}-{timestamp}-{serial}-{pid}~{host}~{port}'
 fi
 
 std_warc_size=$(( 1024 * 1024 * 1024 )) # 1 gibibyte
-max_size=$(( $max_GB * $std_warc_size ))
+max_size=$(( max_GB * std_warc_size ))
 warc_series=''
-warcs_per_series=$(( $max_size / $std_warc_size ))
+warcs_per_series=$(( max_size / std_warc_size ))
 
 # check for warcvalidator on path ($WARC_TOOLS/app/warcvalidator)
 # 
@@ -158,14 +144,20 @@ warcs_per_series=$(( $max_size / $std_warc_size ))
 #   exit 2
 # fi
 
-open="$job_dir/PACKED.open"
-DRAINME="$job_dir/DRAINME"
-FINISH_DRAIN="$job_dir/FINISH_DRAIN"
-total_num_warcs=`ls $job_dir/*.{arc,warc}.gz 2>/dev/null | wc -l`
-total_size_warcs=`$BIN/addup-warcs.sh $job_dir | awk '{print $4}'`
-est_num_series=$(( $total_num_warcs / $warcs_per_series )) 
+SUFFIX_RE='\.w?arc\(\.gz\)?'
+WARC_NAME_RE="$(sed -e 's/{[^}]*}/\\(.*\\)/g' <<<"$WARC_NAME_PATTERN")"
+WARC_NAME_RE_FIND=".*/${WARC_NAME_RE}${SUFFIX_RE}"'$'
 
-echo "  DRAINME          = $DRAINME"
+open="$job_dir/PACKED.open"
+FINISH_DRAIN="$job_dir/FINISH_DRAIN"
+total_num_warcs=0
+total_size_warcs=0
+for w in $(find $job_dir -regex "${WARC_NAME_RE_FIND}"); do
+    ((total_num_warcs++))
+    ((total_size_warcs += $(stat -c %s $w)))
+done
+est_num_series=$(( total_num_warcs / warcs_per_series )) 
+
 echo "  job_dir          = $job_dir"
 echo "  xfer_home        = $xfer_home"
 echo "  warc_naming      = $warc_naming"
@@ -182,12 +174,6 @@ echo "  mode             = $mode"
 echo "  compactify       = $compactify"
 
 if [ $force -ne 1 ]; then query_user; fi
-
-# look for DRAINME
-if [ ! -e $DRAINME ]; then
-  echo $(basename $0) "DRAINME file not found, exiting."
-  exit 0
-fi
 
 # abort packing when less than max_GB warcs and no FINISH_DRAIN
 if [ ! -f $FINISH_DRAIN ]; then
@@ -220,19 +206,19 @@ mfiles=()  # manifest files array
 
 # loop over warcs in job dir
 cd $job_dir
-for w in `find $job_dir/ \
-    -maxdepth 1 \( -name \*.arc.gz -o -name \*.warc.gz \)\
-    | sort`
+for w in $(find $job_dir -maxdepth 1 -regex "${WARC_NAME_RE_FIND}" | sort)
 do 
-  # check gzip container
-  echo "  verifying gz: $(basename $w)"
-  zcat $w > /dev/null || {
-    echo "ERROR: bad gzip, skipping file: $w"
-    echo "  mv $w $w.bad"
-    mv $w "${w}.bad"
-    continue
-  }
-  ((gz_OK_count++))
+  if [[ $w =~ \.gz$ ]]; then
+    # check gzip container
+    echo "  verifying gz: $(basename $w)"
+    gzip -t $w > /dev/null || {
+      echo "ERROR: bad gzip, skipping file: $w"
+      echo "  mv $w $w.bad"
+      mv $w "${w}.bad"
+      continue
+    }
+    ((gz_OK_count++))
+  fi
 
   # validate WARC - TBD
   # echo "  validating WARC: $w"
@@ -247,20 +233,20 @@ do
 
   # increment msize
   fsize=$(stat -c %s $w)
-  ((msize+=$fsize))
+  ((msize+=fsize))
 
   ((warc_count++))
   # "1" if w is the last warc in job_dir
-  is_last_warc=$(($warc_count == $total_num_warcs))
+  is_last_warc=$((warc_count == total_num_warcs))
 
   # keep adding file until msize > max_size, or the last file
-  if (($msize <= $max_size && !$is_last_warc)); then
+  if ((msize <= max_size && !is_last_warc)); then
       mfiles+=("$w")
       continue
   fi
 
   # only pack last warcs if FINISH_DRAIN
-  if (($is_last_warc)); then
+  if ((is_last_warc)); then
     mfiles+=("$w")
     next_mfiles=()
     next_msize=0
@@ -272,7 +258,7 @@ do
 	   "(${#mfiles[@]})"
       continue
     fi
-  elif ((${#mfiles[0]} == 0)); then
+  elif ((${#mfiles[@]} == 0)); then
     # first file is larger than $max_size - pack it by itself
     mfiles+=("$w")
     next_mfiles=()
@@ -289,33 +275,25 @@ do
   suffix=''
   # breaks when item directory is secured successfully
   while true; do
-    warc_series=$($set_warc_series $(basename "${mfiles[0]}"))
+    warc_series=$(make_item_name $(basename "${mfiles[0]}") \
+      $(basename "${mfiles[${#mfiles[@]}-1]}"))
 
-    last_serial=`echo "${mfiles[${#mfiles[@]}-1]}"\
-	| awk '{l=split($job_dir, a, "-"); printf(a[l-1]);}'`
-    # FIXME this results in two crawler name in warc_series
-    if ((!$compactify)); then
-	warc_series="${warc_series}-${last_serial}-${crawler}"
-    fi
     pack_info="$warc_series ${#mfiles[@]} $msize"
 
     echo "files considered for packing:" 
-    for ((i=0; i<${#mfiles[@]}; i++)); do
-	printf "%5s %s\n" [$i] ${mfiles[$i]}
+    i=0
+    for file in ${mfiles[@]}; do
+	printf "%5s %s\n" [$((++i))] $file
     done
 
-    echo
-    echo "WARNING: WARC naming may have changed, check series: $warc_series"
-    echo
-
-    echo "==== $pack_info  ====  "
+    echo "==== $pack_info ===="
 
     # make xfer_dir
     xfer_dir="$xfer_home/${warc_series}"
     if [ -d $xfer_dir ]; then
       echo "$xfer_dir exists"
       if [ -f $xfer_dir/PACKED ]; then
-	if (($compactify)); then
+	if ((compactify)); then
 	  echo $xfer_dir/PACKED exists - item name conflict, adding suffix to resolve
 	  ((--suffix)) # sets "-1" to suffix when suffix==''
 	else
@@ -326,35 +304,33 @@ do
     else
       echo "mkdir -p $xfer_dir"
       mkdir -p $xfer_dir || {
-	  echo "ERROR: mkdir failed: $xfer_dir"
-	  exit 1
+	echo "ERROR: mkdir failed: $xfer_dir"
+	exit 1
       }
       break
     fi
   done
 
   # move files in this manifest
-  for ((i=0;i<${#mfiles[@]};i++))
-  do
-    if (($compactify)); then
-	source=${mfiles[$i]}
-	target=$(compactify_target $(basename ${mfiles[$i]}))
+  for source in ${mfiles[@]}; do
+    if ((compactify)); then
+      target=$xfer_dir/$(compactify_target $(basename $source))
     else
-	source=${mfiles[$i]}
-	target=$xfer_dir
+      target=$xfer_dir
     fi
     echo "mv $source $target"
-    mv $source $target || {
-      echo "ERROR: mv failed"
-      exit 1
-    }
-    ((pack_count++))  
+    if [ -z "$dry_run" ]; then
+	mv $source $target || {
+	  echo "ERROR: mv failed"; exit 1
+	}
+    fi
+    ((pack_count++))
     unset source
     unset target
   done       
 
   # leave PACKED file
-  echo "echo '$pack_info' > $xfer_dir/PACKED"
+  echo "PACKED: $pack_info"
   echo $pack_info > $xfer_dir/PACKED
 
   # check mode

@@ -16,6 +16,93 @@ import yaml
 
 MAX_ITEM_SIZE_GB = 10
 
+def is_alnum(x): return x.isalnum()
+def is_integer(x): return type(x) == int
+def is_name(x): return re.match(r'[-_a-zA-Z0-9]+$', x)
+
+class DrainConfig(object):
+    def __init__(self, fname):
+        self.fname = fname
+        self.cfg = self.load(fname)
+
+    def load(self, fname):
+        """return config dict from YAML file"""
+        try:
+            with open(fname) as f:
+                return yaml.load(f.read().decode('utf-8'))
+        except OSError:
+            print >>sys.stderr, "Failed to open %s" % fname
+        except yaml.YAMLError, exc:
+            print >>sys.stderr, "Error parsing config:", exc
+            sys.exit(1)
+
+    def __check(self, name, vf, msg):
+        v = self.get_param(name)
+        if not vf(v):
+            raise ValueError, '%s %s: %s' % (name, msg, v)
+ 
+    def validate(self):
+        self.__check('crawljob', is_name, 'must be alpha-numeric')
+        self.__check('job_dir', os.path.isdir, 'must be a directory')
+        self.__check('xfer_dir', os.path.isdir, 'must be a directory')
+        self.__check('sleep_time', is_integer, 'must be an integer')
+        # max_size < MAX_ITEM_SIZE_GB
+        if self.cfg['max_size'] > MAX_ITEM_SIZE_GB:
+            raise ValueError, "max_size=%d exceeds MAX_ITEM_SIZE_GB=%d" % (
+                self.cfg['max_size'], MAX_ITEM_SIZE_GB)
+        # WARC_naming = {1, 2}
+        self.__check('WARC_naming', lambda x: x in (1, 2),
+                     'must be 1 or 2')
+        self.__check('block_delay', is_integer, 'must be an integer')
+        self.__check('retry_delay', is_integer, 'must be an integer')
+
+        # description descriptive with keywords
+        if re.search("{describe_effort}", self.cfg['description']):
+            raise ValueError, "desription must not contain "\
+                + "'{describe_effort}'"
+        for key in ('CRAWLHOST','CRAWLJOB','START_DATE','END_DATE'):
+            if not re.search(key, self.cfg['description']):
+                raise ValueError, "description must contain " + key
+        # operator not tbd
+        self.__check('operator', lambda x: x != 'tbd@archive.org',
+                     'must be proper operator identifier')
+        # collections not TBD
+        self.__check('collections', lambda x: x != 'TBD',
+                     'must not contain "TBD"')
+        # title_prefix not TBD
+        self.__check('title_prefix', lambda x: x != 'TBD Crawldata',
+                     'is invalid')
+        # creator, sponsor, contributor, scanningcenter not null
+        for key in ('creator','sponsor','contributor','scanningcenter'):
+            self.__check(key, lambda x: x is not None, 'is missing')
+        # derive is int
+        self.__check('derive', is_integer, 'must be an integer')
+        # compact_names is int
+        self.__check('compact_names', is_integer, 'must be an integer')
+
+        return True
+
+    @property
+    def warc_name_pattern(self):
+        naming = self.get_param('WARC_naming')
+        if naming == 1:
+            return '{prefix}-{timestamp}-{serial}-{host}'
+        elif naming == 2:
+            return '{prefix}-{timestamp}-{serial}-{pid}~{host}~{port}'
+        else:
+            return str(naming)
+
+    def get_param(self, param):
+        if param in ('xfer_dir', 'job_dir'):
+            return os.path.abspath(os.path.join(
+                    os.path.dirname(self.fname), self.cfg[param]))
+        if param == 'warc_name_pattern':
+            return self.warc_name_pattern
+        return self.cfg.get(param)
+
+    def pprint(self):
+        pprint.pprint(self.cfg)
+        
 def get_param(fname,param):
     """ return value for param from YAML file """
     cfg = load_config(fname)
@@ -113,8 +200,9 @@ if __name__ == "__main__":
         sys.exit(1)
     else:
         """ process args """
+        config = DrainConfig(sys.argv[1])
         if len(sys.argv) == 2:
-            if validate(get_config(sys.argv[1])):
-                pprint_config(load_config(sys.argv[1]))
-        if len(sys.argv) == 3:
-            print get_param(sys.argv[1],sys.argv[2])
+            if config.validate():
+                config.pprint()
+        elif len(sys.argv) == 3:
+            print config.get_param(sys.argv[2])
