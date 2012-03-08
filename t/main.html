@@ -8,7 +8,13 @@
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.5.1/jquery.js"></script>
 <style type="text/css">
 table { border-collapse:collapse; }
-tr.completed { background-color: #ddd; }
+tr.completed {
+  background-color: #ddd;
+  display: none;
+}
+table.showcompleted tr.completed {
+  display: table-row;
+}
 tr.running { background-color: #dfd; }
 </style>
 </head>
@@ -17,7 +23,7 @@ tr.running { background-color: #dfd; }
 {% for pj in projects %}
   <div class="project" projectid="{{pj.id}}">
   <h2>Project {{pj.id}} : {{pj.config_fname}}</h2>
-  <h3>Source : {{pj.confobj['job_dir']}}</h3>
+  <h3>Source : {{pj.configobj['job_dir']}}</h3>
   {% set src = pj.source %}
   {% if src.exists %}
     <table border="1" cellpadding="3">
@@ -155,12 +161,12 @@ function retryasap(pj, series){
 jQuery(document).ready(function(){
   var comp = jQuery("tr.completed");
   if (comp.length > 0) {
-    comp.hide();
     var a = jQuery(document.createElement('a')).attr('href','#')
       .html('show/hide '+comp.length+' completed serieses')
-      .click(function(ev){
-        ev.preventDefault();
-        jQuery('tr.completed').toggle(); });
+      .click(function(){
+        jQuery('#uploads').toggleClass('showcompleted');
+        return false;
+      });
     jQuery('#uploads').before(a);
   }
   jQuery('#startpackwarcs').get(0).disabled =

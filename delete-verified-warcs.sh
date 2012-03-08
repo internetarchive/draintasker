@@ -92,13 +92,9 @@ for d in $(find $1 -mindepth 1 -maxdepth 1 -type d); do
 	echo "  "$(cat $t)
 	echo "  original_warc: $(basename $w)"
 	echo "  rm $w"
-	if [ ! -w $w ]; then
-	  echo "ERROR: file not writable: $w";
-	  continue
-	fi
 	rm $w || {
 	    echo "ERROR: could not rm file: $w $?" | tee -a $CLEAN_ERR
-	    exit 3
+	    continue
 	}
       fi
       (( rm_warc_count++ ))

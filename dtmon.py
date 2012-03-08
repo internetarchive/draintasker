@@ -73,9 +73,6 @@ def getdtprocesses(dtconf, excludes=[]):
         elif cmd == 'pack-warcs.sh':
             result.append(Storage(p=Storage(pid=pid), cmdline=cmdline,
                                   o=getstdout(pid), st=start_time))
-        elif cmd == 's3-drain-job.sh':
-            result.append(Storage(p=Storage(pid=pid), cmdline=cmdline,
-                                  o=getstdout(pid), st=start_time))
         elif cmd == 'make-manifests.sh':
             result.append(Storage(p=Storage(pid=pid), cmdline=cmdline,
                                   o=getstdout(pid), st=start_time))
@@ -260,35 +257,24 @@ class Project(object):
             return False
         
     def loadconfig(self, force=False):
-        # f = open(self.config_fname)
-        # self.confobj = yaml.load(f.read().decode('utf-8'))
-        # f.close()
         if force or self.is_config_updated():
-            self.confobj = config.load_config(self.config_fname)
-            self.validate_config()
-            self.configure_instance()
+            self.configobj = config.DrainConfig(self.config_fname)
+            try:
+                self.configobj.validate()
+                print "config OK: %s" % self.config_fname
+            except Exception as ex:
+                print >>sys.stderr, 'Aborting: invalid config %s: %s' % (
+                    self.config_fname, ex)
+                sys.exit(1)
+            self.DRAINME = self.configobj['drainme']
+            self.sleep = self.configobj['sleep_time']
 
-    def validate_config(self):
-        """ validate given config file """
-        try:
-            config.validate(self.confobj)
-            print "config OK:", self.config_fname
-            # config.pprint_config(self.config)
-        except Exception as detail:
-            print "Error:", detail
-            sys.exit("Aborted: invalid config: "+self.config_fname)
-
-    def configure_instance(self):
-        """ set this instance's config params """
-        self.DRAINME = os.path.join(self.confobj['job_dir'], 'DRAINME')
-        self.sleep = self.confobj["sleep_time"]
-        
     def configitems(self):
-        return self.confobj.iteritems()
+        return self.configobj.iteritems()
 
     @property
     def xfer_dir(self):
-        return self.confobj['xfer_dir']
+        return self.configobj['xfer_dir']
 
     def count_warcs(self, dir):
         cnt = 0
@@ -311,7 +297,7 @@ class Project(object):
 
     @property
     def source(self):
-        srcdir = self.confobj['job_dir']
+        srcdir = self.configobj['job_dir']
         if os.path.isdir(srcdir):
             s = os.statvfs(srcdir)
             r = Storage(
@@ -332,7 +318,7 @@ class Project(object):
     def uploads(self):
         '''return upload serieses'''
         serieses = []
-        xferdir = self.confobj['xfer_dir']
+        xferdir = self.configobj['xfer_dir']
         if os.path.isdir(xferdir):
             for e in os.listdir(xferdir):
                 p = os.path.join(xferdir, e)
@@ -345,7 +331,7 @@ class Project(object):
     def get_series(self, name):
         '''return specific series by its name'''
         # TODO should cache Series objects
-        xferdir = self.confobj['xfer_dir']
+        xferdir = self.configobj['xfer_dir']
         serdir = os.path.join(xferdir, name)
         if os.path.isdir(serdir):
              s = Series(xferdir, name)
@@ -353,36 +339,53 @@ class Project(object):
         return None
 
     def start_packwarcs(self):
-        args = (self.manager.DT_PACK_WARCS, self.confobj['job_dir'],
-                self.confobj['xfer_dir'],
-                str(self.confobj['max_size']),
-                str(self.confobj['WARC_naming']),
-                '1', 'single',
-                str(self.confobj['compact_names']))
         outfile = NamedTemporaryFile(prefix='packwarcs', delete=False)
-        p = subprocess.Popen(args, stdin=None, stdout=outfile, stderr=outfile,
-                             cwd=self.manager.home)
+        p = self.run_step('pack', outf=outfile)
         rec = Storage(p=p, o=outfile, st=datetime.now(), cmdline=args)
         self.processes.append(rec)
         return rec
 
     def start_launchtransfers(self, mode='single'):
-        args = (self.manager.DT_LAUNCH_TRANSFERS, self.config_fname,
-                '1', mode)
         outfile = NamedTemporaryFile(prefix='launchtransfers', delete=False)
-        p = subprocess.Popen(args, stdin=None, stdout=outfile, stderr=outfile,
-                             cwd=self.manager.home)
+        p = self.run_step('ingest', outf=outfile)
         rec = Storage(p=p, o=outfile, st=datetime.now(), cmdline=args)
         self.processes.append(rec)
         return rec
 
+    # no space in, no quotes around executable name.
+    STEP_COMMAND = {
+        'pack': 'pack-warcs.sh %(job_dir)s %(xfer_dir)s %(max_size)s %(WARC_naming)s 1 single %(compact_names)s',
+        'manifest': 'make-manifests.sh %(xfer_dir)s single',
+        'ingest': 's3-launch-transfers.sh %(config)s 1 single',
+        'clean': 'delete-verified-warcs.sh %(xfer_dir)s 1'
+        }
+
     def start_drain_job(self):
-        args = (self.manager.DT_DRAIN_JOB, self.config_fname)
-        # output goes to the same as this script
-        try:
-            subprocess.check_call(args, cwd=self.manager.home)
-        except Exception as ex:
-            print "Warning: failed to start %s: %s" % (' '.join(args), ex)
+        for step in ('pack', 'manifest', 'ingest', 'clean'):
+            p = self.run_step(step)
+            returncode = p.wait()
+            if returncode != 0:
+                print >>sys.stderr, ('ERROR step %s failed with returncode %d' %
+                                     (step, returncode))
+                continue
+
+    def run_step(self, step, outf=None):
+        cmd = self.STEP_COMMAND[step]
+        prehook = self.configobj['before'+step]
+        if prehook:
+            cmd = prehook + ' && ' + cmd
+        posthook = self.configobj['on'+step]
+        if posthook:
+            cmd += (' && ' + posthook)
+        cmd = cmd % self.configobj
+        if not cmd.startswith('/'):
+            cmd = self.manager.home + '/' + cmd
+        print >>sys.stderr, "%s: %s" % (step, cmd)
+        # TODO set cwd to where config file is located
+        p = subprocess.Popen(cmd, shell=True, cwd=self.manager.home,
+                             stdout=(outf or sys.stdout),
+                             stderr=(outf or sys.stderr))
+        return p
 
     def get_dtprocesses(self):
         excludes = [pinfo.p.pid for pinfo in self.processes]
@@ -393,16 +396,14 @@ class Project(object):
         return os.path.isfile(self.DRAINME)
 
     def drain(self, on):
-        srcdir = self.confobj['job_dir']
-        file = os.path.join(srcdir, 'DRAINME')
         if on:
-            f = open(file, 'w')
+            f = open(self.DRAINME, 'w')
             f.close()
         else:
-            os.remove(file)
+            os.remove(self.DRAINME)
 
     def finishdrain(self, on):
-        srcdir = self.confobj['job_dir']
+        srcdir = self.configobj['job_dir']
         file = os.path.join(srcdir, 'FINISH_DRAIN')
         if on:
             f = open(file, 'w')
@@ -433,30 +434,10 @@ class UpLoader:
     def __cmd(self, name):
         return os.path.join(self.home, (self.prefix or '') + name)
 
-    # def init_config(self,fname):
-    #     """ initial config pass """
-    #     self.config_fname = fname
-    #     self.update_config()
-
-    # def update_config(self):
-    #     """ update config before each drain job """
-    #     self.config = config.get_config(self.config_fname)
-    #     self.validate_config()
-    #     self.configure_instance()
-
-    # def drain(self):
-    #     """ drain job (or whatever) """
-    #     import subprocess
-    #     try:
-    #         subprocess.check_call(["./s3-drain-job.sh",
-    #                                self.config_fname])
-    #     except Exception, e:
-    #         print "Warning: process failed:", e
-
-    def run(self):
+    def run(self, once=False):
         """ if DRAINME file exists, update config, drain job, sleep """
         utils.echo_start(self.name)
-        while True:
+        while 1:
             for pj in self.projects:
                 pj.loadconfig()
                 if pj.is_draining():
@@ -470,9 +451,11 @@ class UpLoader:
                 # (overridden by command line option), until we start
                 # using draintasker with multiple projects.
                 sleep_time = self.sleep or pj.sleep
-                print "sleeping %ds" % sleep_time
-                sys.stdout.flush()
-                time.sleep(sleep_time)
+                if not once:
+                    print "sleeping %ds" % sleep_time
+                    sys.stdout.flush()
+                    time.sleep(sleep_time)
+            if once: break
 
 if __name__ == "__main__":
     from optparse import OptionParser
@@ -495,6 +478,11 @@ if __name__ == "__main__":
                    default=os.environ.get('DTMON_PREFIX', ''),
                    help='string to prepend to each sub-command '
                    '(intended for test/development aid)')
+    opt.add_option('-1', '--once', action='store_true', dest='once',
+                   help='run each draining steps just once and exit'
+                   ' this option replaces running s3-drain-jobs.sh manually',
+                   default=False)
+
     options, args = opt.parse_args()
     if len(args) < 1:
         opt.print_help(sys.stderr)
@@ -502,15 +490,25 @@ if __name__ == "__main__":
 
     configs = [os.path.abspath(a) for a in args]
     if os.path.isdir(configs[0]):
-        exit('%s: is a directory' % args[0])
+        opt.error('%s is a directory' % args[0])
 
     dt = UpLoader(configs, sleep=options.interval, prefix=options.prefix)
     # utils.reflect(dt)
     if options.run_http_server:
         import admin
-        admin.Server(dt, options.port).start()
-        #admin.Server([dict(dtconf=p) for p in configs],
-        #             options.port, dt).start()
+        try:
+            admin.Server(dt, options.port).start()
+        except Exception as ex:
+            if hasattr(ex, 'errno') and ex.errno == os.errno.EADDRINUSE:
+                print >>sys.stderr, (
+                    "ERRROR:"
+                    "port %d is used by other process. you can either specify"
+                    " different port with -p (--http-port) option, or disable"
+                    " HTTP status monitoring feature with --no-http option" %
+                    options.port)
+                sys.exit(1)
+            else:
+                raise
     if options.logfile:
         os.close(1)
         assert os.open(options.logfile, os.O_WRONLY|os.O_CREAT) == 1
@@ -518,7 +516,7 @@ if __name__ == "__main__":
         os.close(2)
         assert os.dup(1) == 2
     try:
-        dt.run()
+        dt.run(options.once)
     except KeyboardInterrupt:
         pass
     finally:
