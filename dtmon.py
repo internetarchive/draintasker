@@ -371,6 +371,8 @@ class Project(object):
 
     def run_step(self, step, outf=None):
         cmd = self.STEP_COMMAND[step]
+        if not cmd.startswith('/'):
+            cmd = self.manager.home + '/' + cmd
         prehook = self.configobj['before'+step]
         if prehook:
             cmd = prehook + ' && ' + cmd
@@ -378,8 +380,6 @@ class Project(object):
         if posthook:
             cmd += (' && ' + posthook)
         cmd = cmd % self.configobj
-        if not cmd.startswith('/'):
-            cmd = self.manager.home + '/' + cmd
         print >>sys.stderr, "%s: %s" % (step, cmd)
         # TODO set cwd to where config file is located
         p = subprocess.Popen(cmd, shell=True, cwd=self.manager.home,
