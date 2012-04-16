@@ -486,28 +486,37 @@ do
   echo "parsing MANIFEST:" | tee -a $OPEN
   echo "  $MANIFEST" | tee -a $OPEN
   unset files
+  nfiles_found=0
   for warc in $(awk '{print $2}' $MANIFEST)
   do
       file="${d}/${warc}"
       if [ -f "$file" ]
       then
 	  files+=("$file")
+	  ((nfiles_found++))
       else
-	  echo "ERROR: file not found: $file" | tee -a $OPEN
-	  echo "Aborting!" | tee -a $OPEN
-	  cp $OPEN $ERROR
-	  exit 1
+	  # allow for re-uploading some files after the itemdir has been
+	  # cleaned.
+	  if [ -f "$file.tombstone" ]; then
+	    ((nfiles_found++))
+	  else
+	      echo "ERROR: file not found: $file" | tee -a $OPEN
+	      echo "Aborting!" | tee -a $OPEN
+	      cp $OPEN $ERROR
+	      exit 1
+	  fi
       fi
   done
 
   # check files found and build range string
   # --------------------------------------------------------------
   nfiles_manifest=$(grep -c '[^[:alnum:]]' $MANIFEST)
-  nfiles_found=${#files[@]}
 
   echo "  nfiles_manifest = ${nfiles_manifest}" | tee -a $OPEN
   echo "  nfiles_found = ${nfiles_found}" | tee -a $OPEN
 
+  # XXX - this check is redundant; script should have exitted above
+  # if there's missing files. this does not catch extra files.
   if [ ${nfiles_manifest} -ne ${nfiles_found} ]; then
       echo "ERROR: count mis-match:"\
 	   "nfiles_manifest=${nfiles_manifest} vs"\
@@ -516,6 +525,10 @@ do
       echo "Aborting!" | tee -a $OPEN
       cp $OPEN $ERROR
       exit 2
+  fi
+  if (( ${#files[0]} == 0 )); then
+      echo "${warc_series}: no files to upload"
+      continue
   fi
 
   first_file=${files[0]}
