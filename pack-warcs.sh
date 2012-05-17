@@ -85,7 +85,7 @@ function compactify_target {
 function make_item_name {
   parse_warc_name "$1" f_
   if ((compactify)); then
-    echo "${f_prefix}-${f_timestamp:0:14}${f_suffix}-${f_shost}"
+    echo "${f_prefix}-${f_timestamp:0:14}${suffix}-${f_shost}"
   else
     parse_warc_name "$2" l_
     echo "${f_prefix}-${f_timestamp}-${f_serial}-${l_serial}-${f_shost}"
