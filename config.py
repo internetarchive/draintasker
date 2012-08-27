@@ -131,4 +131,5 @@ if __name__ == "__main__":
             if config.validate():
                 config.pprint()
         elif len(sys.argv) == 3:
-            print config.get_param(sys.argv[2])
+            v = config.get_param(sys.argv[2])
+            print v if v is not None else ''
