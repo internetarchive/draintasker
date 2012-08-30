@@ -39,8 +39,7 @@
 PG=$0; test -h $PG && PG=$(readlink $PG)
 BIN=$(dirname $PG)
 
-usage[0]="job_dir xfer_dir max_size warc_naming"
-usage[1]="[force] [mode=single] [compactify=0]"
+usage="config [force] [mode=single]"
 
 function unlock_job_dir {
   if [ -f $open ]; then
@@ -84,39 +83,54 @@ function compactify_target {
 
 function make_item_name {
   parse_warc_name "$1" f_
-  if ((compactify)); then
-    echo "${f_prefix}-${f_timestamp:0:14}${suffix}-${f_shost}"
-  else
-    parse_warc_name "$2" l_
-    echo "${f_prefix}-${f_timestamp}-${f_serial}-${l_serial}-${f_shost}"
-  fi
+  parse_warc_name "$2" l_
+  local prefix=${f_prefix} shost=${f_shost}
+  local timestamp=${f_timestamp} timestamp14=${f_timestamp:0:14}
+  local serial=${f_serial} lastserial=${l_serial}
+  eval echo $ITEM_NAME_TEMPLATE
 }
 
 function report_done {
-    echo "$total_num_warcs warcs"\
-         "$gz_OK_count gz_OK"\
-         "$valid_count validated"\
-         "$pack_count packed"\
+    echo "$total_num_warcs warcs,"\
+         "$gz_OK_count gz_OK,"\
+         "$valid_count validated,"\
+         "$pack_count packed,"\
          "$series_count series"
     echo $(basename $0) done. $(date)
 }
 
 ################################################################
 
-if (($# < 4)); then
+#if (($# < 4)); then
+if (($# < 1)); then
   echo $(basename $0) ${usage[@]}
   exit 1
 fi
 
-job_dir=$1
-xfer_home=$2
-max_GB=$3  
-warc_naming=$4
-force=${5:-0}
-mode=${6:-0}
-compactify=${7:-0}
+echo $(basename $0) $(date)
 
-echo `basename $0` `date`
+CONFIG=$1
+$BIN/config.py $CONFIG || {
+  echo "ERROR: invalid config: $CONFIG"
+  exit 1
+}
+force=${2:-0}
+mode=${3:-single}
+# get config parameters
+job_dir=$($BIN/config.py $CONFIG job_dir)
+xfer_home=$($BIN/config.py $CONFIG xfer_dir)
+max_GB=$($BIN/config.py $CONFIG max_size)
+warc_naming=$($BIN/config.py $CONFIG WARC_naming)
+item_naming=$($BIN/config.py $CONFIG item_naming)
+compactify=$($BIN/config.py $CONFIG compact_names)
+if [ -z $item_naming ]; then
+    if ((compactify)); then
+	item_naming='{prefix}-{timestamp14}{suffix}-{shost}'
+    else
+	item_naming='{prefix}-{timestamp}-{serial}-{lastserial}-{shost}'
+    fi
+fi
+ITEM_NAME_TEMPLATE=$(sed -e 's/{\(prefix\|timestamp\(14\|\)\|\(last\|\)serial\|shost\|suffix\)}/$&/g' <<<"$item_naming")
 
 if [ ! -d $job_dir ]; then
   echo "ERROR: job_dir not found: $job_dir"
@@ -152,7 +166,7 @@ open="$job_dir/PACKED.open"
 FINISH_DRAIN="$job_dir/FINISH_DRAIN"
 total_num_warcs=0
 total_size_warcs=0
-for w in $(find $job_dir -regex "${WARC_NAME_RE_FIND}"); do
+for w in $(find $job_dir -maxdepth 1 -regex "${WARC_NAME_RE_FIND}"); do
     ((total_num_warcs++))
     ((total_size_warcs += $(stat -c %s $w)))
 done
@@ -210,13 +224,15 @@ for w in $(find $job_dir -maxdepth 1 -regex "${WARC_NAME_RE_FIND}" | sort)
 do 
   if [[ $w =~ \.gz$ ]]; then
     # check gzip container
-    echo "  verifying gz: $(basename $w)"
-    gzip -t $w > /dev/null || {
-      echo "ERROR: bad gzip, skipping file: $w"
-      echo "  mv $w $w.bad"
-      mv $w "${w}.bad"
-      continue
-    }
+    if [ "$mode" != test ]; then
+      echo "  verifying gz: $(basename $w)"
+      gzip -t $w > /dev/null || {
+	echo "ERROR: bad gzip, skipping file: $w"
+	echo "  mv $w $w.bad"
+	mv $w "${w}.bad"
+	continue
+      }
+    fi
     ((gz_OK_count++))
   fi
 
@@ -277,6 +293,10 @@ do
   while true; do
     warc_series=$(make_item_name $(basename "${mfiles[0]}") \
       $(basename "${mfiles[${#mfiles[@]}-1]}"))
+    if [ -z $warc_series ]; then
+      echo "ERROR:item identifier generation failed"
+      exit 1
+    fi
 
     pack_info="$warc_series ${#mfiles[@]} $msize"
 
@@ -319,7 +339,7 @@ do
       target=$xfer_dir
     fi
     echo "mv $source $target"
-    if [ -z "$dry_run" ]; then
+    if [ "$mode" != test ]; then
 	mv $source $target || {
 	  echo "ERROR: mv failed"; exit 1
 	}
@@ -334,7 +354,7 @@ do
   echo $pack_info > $xfer_dir/PACKED
 
   # check mode
-  if [ $mode == 'single' ]; then
+  if [ "$mode" == single -o "$mode" == test ]; then
     echo "mode = $mode, exiting normally."
     break
   fi

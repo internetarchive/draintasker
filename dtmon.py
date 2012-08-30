@@ -354,7 +354,7 @@ class Project(object):
 
     # no space in, no quotes around executable name.
     STEP_COMMAND = {
-        'pack': 'pack-warcs.sh %(job_dir)s %(xfer_dir)s %(max_size)s %(WARC_naming)s 1 single %(compact_names)s',
+        'pack': 'pack-warcs.sh %(config)s 1 single',
         'manifest': 'make-manifests.sh %(xfer_dir)s single',
         'ingest': 's3-launch-transfers.sh %(config)s 1 single',
         'clean': 'delete-verified-warcs.sh %(xfer_dir)s 1'
