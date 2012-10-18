@@ -16,6 +16,7 @@
 # siznax 2009
 
 usage="xfer_job_dir [force]"
+cmdname="$(basename $0)"
 
 function query_user {
   echo "Continue [Y/n]> "
@@ -27,89 +28,126 @@ function query_user {
   fi
 }
 
+function clean_item {
+  local d=$1
+  local warc_series=$(basename $d)
+  local MANIFEST=$d/MANIFEST TOMBSTONE=$d/TOMBSTONE
+  local upload_files=($(awk '{print $2}' $MANIFEST))
+  local manifest_count=${#upload_files[@]}
+  local tombstone_count=$(wc -l < $TOMBSTONE)
+
+  # if MANIFEST and TOMBSTONE does not agree on number of uploaded files,
+  # something must have gone wrong (TODO: can we be a bit smarter here?)
+  if (( tombstone_count != manifest_count )); then
+    printf 'ERROR: count mis-match: TOMBSTONE=%d MANIFEST=%d in series %s\n' \
+	$tombstone_count $manifest_count "$warc_series" >&2
+    return 1
+  fi
+  if ((manifest_count == 0)); then
+    echo "no uploaded files in this item" >&2
+    continue
+  fi
+
+  # show what's going to happen if running in interactive mode
+  if (( ! nointeractive )); then
+    echo "removing $manifest_count files in $d"
+    query_user
+  fi
+
+  # remove files
+  count_removed=0
+  count_missing=0
+  for w in ${upload_files[@]}; do
+    if [ -e $d/$w ]; then
+      # files without corresponding .tombstone file should not be
+      # deleted.
+      t="${w}.tombstone"
+      if [ ! -e "$d/$t" ]; then
+	# TODO: should we delete TOMBSTONE to have s3-launch-transfer re-process
+	# this item?
+	echo "ERROR: no .tombstone for $w" >&2
+	return 1
+      fi
+      echo "removing $w uploaded to $(cat $d/$t)" >&2
+      rm $d/$w || return 1
+      (( count_removed++ ))
+    else
+      (( count_missing++ ))
+    fi
+  done
+  if (( count_missing > 0 )); then
+    echo "$warc_series: removed $count_removed files ($count_missing already removed)" >&2
+  else
+    echo "$warc_series: removed $count_removed files" >&2
+  fi
+  (( total_rm_count += count_removed ))
+  return 0
+}
+
 if [ -z "$1" ]; then
-    echo "Usage: $(basename $0) $usage"
+    echo "Usage: $cmdname $usage"
     exit 1
 fi
 
-echo `basename $0` `date`
+echo "$cmdname: $(date)"
 
 xfer_job_dir=$1
+nointeractive=$2
 total_rm_count=0
 
-# loop over warc_series
-for d in $(find $1 -mindepth 1 -maxdepth 1 -type d); do
+# for reporting: count of active items, inactive items, newly cleaned items
+count_items_active=0
+count_items_inactive=0
+count_items_cleaned=0
+count_items_error=0
+count_items_locked=0
 
-  warc_series=$(basename $d)
+# loop over warc_series
+for d in $(find $xfer_job_dir -mindepth 1 -maxdepth 1 -type d); do
+
+  iid=$(basename $d)
   TOMBSTONE="$d/TOMBSTONE"
   MANIFEST="$d/MANIFEST"
-  CLEAN_ERR="$d/CLEAN.err"
+  CLEAN="$d/CLEAN"
 
-  if [ -e $CLEAN_ERR ]; then
-      echo "$CLEAN_ERR exists - skipping"
-      continue
+  if [ -e $CLEAN.err ]; then
+    echo "$iid: has CLEAN.err"
+    continue
+  fi
+  if [ -e $CLEAN ]; then
+    (( count_items_inactive++ ))
+    continue
   fi
 
-  # count original warcs in series
-  orig_warcs=($(find $d -type f -regex '.*\.w?arc\(\.gz\)?$'))
-  warc_count=${#orig_warcs[@]}
+  # s3-launch-transfer.sh creates TOMBSTONE file when it has successfully
+  # uploaded all files. if TOMBSTONE file does not exist, the item is
+  # still being worked on.
+  if [ ! -e $TOMBSTONE ]; then
+    echo "$iid: no TOMBSTONE yet"
+    (( count_items_active++ ))
+    continue
+  fi
 
-  # check for TOMBSTONE
-  if [ -e $TOMBSTONE ]; then
-    echo "TOMBSTONE exists: $TOMBSTONE"
+  if [ -e $CLEAN.open ]; then
+    echo "$iid: has $CLEAN.open"
+    (( count_items_locked++ ))
+    continue
+  fi
 
-    tombstone_count=$(wc -l < $TOMBSTONE)
-    manifest_count=$(wc -l < $MANIFEST)
-
-    # check manifest, tombstone count
-    if [[ $tombstone_count != $manifest_count ]]; then
-      echo "ERROR: count mis-match:"\
-	   "TOMBSTONE=$tombstone_count "\
-	   "MANIFEST=$manifest_count "\
-	   "in series: $warc_series" | tee -a $CLEAN_ERR
-      continue
-    fi
-
-    if [[ $warc_count == 0 ]]; then
-      continue
-    fi
-	
-    echo "found ($warc_count) warcs in: $d"
-
-    echo "  tombstone_count: $tombstone_count"
-    echo "  manifest_count: $manifest_count"
-    echo "  warc_count: $warc_count"
-
-    # remove original warcs
-
-    if [ -z "$2" ]; then query_user; fi
-
-    rm_warc_count=0
-    for w in ${orig_warcs[@]}; do
-      t="${w}.tombstone"
-      if [ -e $t ]; then
-	echo "+ warc_tombstone: $(basename $t)"
-	echo "  "$(cat $t)
-	echo "  original_warc: $(basename $w)"
-	echo "  rm $w"
-	rm $w || {
-	    echo "ERROR: could not rm file: $w $?" | tee -a $CLEAN_ERR
-	    continue
-	}
-      fi
-      (( rm_warc_count++ ))
-    done
-
-    total_rm_count=$(( total_rm_count + rm_warc_count ))
-
-    echo "removed ($rm_warc_count) original warcs"
-
+  if clean_item $d 2>${CLEAN}.open; then
+    mv ${CLEAN}.open $CLEAN
+    (( count_items_cleaned++ ))
   else
-    echo "found NO_TOMBSTONE ($warc_count) warcs in series: $d"
+    mv ${CLEAN}.open ${CLEAN}.err
+    echo failed to clean $d - see ${CLEAN}.err
+    tail -1 ${CLEAN}.err
+    (( count_items_error++ ))
   fi
-  warc_count=0
 done
 
-echo "removed ($total_rm_count) original warcs total"
-
-echo `basename $0` "done." `date`
+printf '%s: %d cleaned, %d inactive, %d active, %d error, %d locked\n' \
+    "$cmdname" \
+    $count_items_cleaned $count_items_inactive $count_items_active \
+    $count_items_error $count_items_locked
+echo "$cmdname: removed $total_rm_count files total"
+echo "$cmdname: done $(date)"
