@@ -459,12 +459,13 @@ do
   fi
 
   # check for files locking this series
-  for lock_file in $OPEN $ERROR $LAUNCH $TASK; do
-      if [ -e $lock_file ]; then
-	  echo "$(basename $lock_file) file exists: $lock_file"
-	  continue 2
-      fi
-  done
+  [ -e $OPEN ] && continue 2
+  if [ -e $ERROR ]; then
+      echo ${d}: $(basename $ERROR) file exists
+      continue 2
+  fi
+  [ -e $LAUNCH ] && continue 2
+  [ -e $TASK ] && continue 2
 
   echo "==== $warc_series ===="  | tee -a $OPEN
   echo "crawldata: $crawldata"   | tee -a $OPEN
