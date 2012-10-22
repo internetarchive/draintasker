@@ -54,6 +54,7 @@ function clean_item {
     query_user
   fi
 
+  echo "cleaning $warc_series"
   # remove files
   count_removed=0
   count_missing=0
