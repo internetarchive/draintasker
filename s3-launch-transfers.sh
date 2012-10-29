@@ -16,7 +16,6 @@
 #     xfer_dir
 #     title_prefix
 #     collection_prefix
-#     test_suffix
 #     block_delay
 #     max_block_count
 #     retry_delay
@@ -40,15 +39,10 @@
 
 PG=$0; test -h $PG && PG=$(readlink $PG)
 BIN=$(dirname $PG)
+: ${GETCONF:=$BIN/config.py}
 
 usage="config [force] [mode=single]"
 
-: ${TEST:=false}
-if $TEST; then
-    CURL=curl_fake
-else
-    CURL=curl
-fi
 s3='s3.us.archive.org'
 dl='www.archive.org/download'
 std_warc_size=$(( 1024*1024*1024 )) # 1 gibibyte
@@ -98,21 +92,6 @@ function set_date_range {
     start_date_ISO="$(set_tISO "$t")"
     start_date_HR="$(set_tHR "$t")"
 
-    # # get warc start date
-    # first_file=`echo ${files[0]} | tr '/' ' ' | awk '{print $NF}'`
-    # if [ $compact_names == 1 ]
-    # then
-    #     t=`echo $files[0] | cut -d '-' -f 2`
-    # else
-    #     t=`echo $files[0] | cut -d '-' -f 2 | grep -o "[0-9]\{14,17\}"`000
-    # 	t=${t:0:17}
-    # fi
-    # first_file_date=$t
-    # set_tISO
-    # start_date_ISO=${tISO}
-    # set_tHR
-    # start_date_HR=${tHR}
-
     scandate=${t:0:14}
     metadate=${t:0:4}
     
@@ -126,38 +105,6 @@ function set_date_range {
     end_date_ISO="$(set_tISO "$t")"
     end_date_HR="$(set_tHR "$t")"
     
-    # if [ ${#files[@]} -gt 1 ]; then
-    # 	last_file=${files[${#files[@]}-1]}
-    #     #last_file=`echo "${files[@]:$((${#files[@]}-1))}"\
-    #     #           | tr '/' ' ' | awk '{print $NF}'`
-    # 	t=
-    #     # if [ $compact_names == 1 ]
-    #     # then
-    #     #     t=`echo $last_file | cut -d '-' -f 2 | grep -o "[0-9]\{14\}"`
-    #     # else
-    #     #     t=`echo $last_file | cut -d '-' -f 2 | grep -o "[0-9]\{14,17\}"`000
-    # 	#     t=${t:0:17}
-    #     # fi
-    #     last_file_date=$t
-    #     # warc end date (from last file mtime). should (closely) 
-    #     # correspond to time of last record in series
-    #     # t=`stat --format=%x "${files[@]:$((${#files[@]}-1))}"\
-    #     #   | cut -d '.' -f 1\
-    #     #   | tr  -d '-'\
-    #     #   | tr  -d ' '\
-    #     #   | tr  -d ':'`
-    # 	t=$(date +%Y%m%d%H%M%S -d @"$(stat -c %Y "$last_file")")
-    # 	last_date=$t
-    # 	end_date_ISO="$(set_tISO "$t")"
-    # 	end_date_HR="$(set_tHR "$t")"
-    # fi
-
-    # if [ -z $end_date_ISO ]
-    # then
-    #     date_range=${start_date_ISO}
-    # else
-    #     date_range="${start_date_ISO} to ${end_date_ISO}"
-    # fi
     date_range="${start_date_ISO} to ${end_date_ISO}"
 }
 
@@ -177,24 +124,22 @@ function echo_curl_output {
 }
 
 function write_success {
-    SUCCESS_FLAG='true'
-    if [ -e "$ERROR" ]
-    then
-        SUCCESS_FLAG='false'
+    local d=$1
+    local success=1
+    if [ -e "$ERROR" ]; then
+	success=0
         echo "ERROR file exists, could not write SUCCESS file." | tee -a $OPEN
     else
-        for warc in `cat $MANIFEST | tr -s ' ' | cut -d ' ' -f 2`
-        do
-            if [ ! -f "${d}/${warc}.tombstone" ]
-            then
-                SUCCESS_FLAG='false'
+	for warc in $(awk '{print $2}' $MANIFEST); do
+            if [ ! -f "${d}/${warc}.tombstone" ]; then
+                #SUCCESS_FLAG='false'
+		success=0
                 echo "ERROR: missing tombstone: ${d}/${warc}" | tee -a $OPEN
                 cp $OPEN $ERROR
                 exit 5
             fi
         done
-        if [ $SUCCESS_FLAG == 'true' ]
-        then
+	if (( success )); then
             echo "copying TASK file:" | tee -a $OPEN
             echo "    $TASK" | tee -a $OPEN
             echo "to SUCCESS file:" | tee -a $OPEN
@@ -243,10 +188,10 @@ function verify_etag {
 }
 
 function write_tombstone {
-    echo "writing download:" | tee -a $OPEN
-    echo "  $download" | tee -a $OPEN
-    echo "into tombstone:" | tee -a $OPEN
-    echo "  $tombstone" | tee -a $OPEN
+    echo "writing download:"
+    echo "  $download"
+    echo "into tombstone:"
+    echo "  $tombstone"
     echo $download > $tombstone
 }
 
@@ -266,7 +211,7 @@ function schedule_retry {
 
 function curl_fake {
     printf '\n>>> THIS IS ONLY A TEST!<<<\n\n' >&2
-    sleep 10
+    sleep 5
     # [response_code] [size_upload] [time_total]
     echo "200 000 000"
 }
@@ -293,12 +238,12 @@ function check_curl_success {
 		bucket_status=1;;
 	    test-add-to-bucket)
 		bucket_status=1
-		echo "creating file: $BUCKET_OK"
-	        touch $BUCKET_OK
+		echo "creating file: $BUCKET_OK" >>$OPEN
+		echo $bucket > $BUCKET_OK
 		;;
 	    *)
 		if verify_etag; then
-                    write_tombstone
+                    write_tombstone >>$OPEN
 		fi
 	    esac
             keep_trying='false'
@@ -353,7 +298,7 @@ function curl_s3 {
             -e 's/ http/\n  &/'\
             -e 's/w\?arc\(.gz\)\?,/&\n    /g'\
             -e 's/-o /\n  &/'\
-      | tee -a $OPEN
+      >>$OPEN
 
     output=$("${curl_cmd[@]}")
     check_curl_success
@@ -369,11 +314,13 @@ if [ -z "$CONFIG" ]; then
     exit 1
 fi
 
-force=$2
-mode=$3
+force=${2:-0}
+mode=${3:-0}
 
-if [ -z $force ]; then force=0; fi
-if [ -z $mode  ]; then mode=0;  fi
+CURL=curl
+if [ $mode = test ]; then
+    CURL=curl_fake
+fi
 
 echo $(basename $0) $(date)
 
@@ -388,15 +335,16 @@ if [ ! -f $S3CFG ]; then
     exit 1
 fi
 # validate configuration
-$BIN/config.py $CONFIG || {
+$GETCONF $CONFIG || {
     echo "ERROR: invalid config: $CONFIG"
     exit 1
 }
-xfer_job_dir=$($BIN/config.py $CONFIG xfer_dir)
+xfer_job_dir=$($GETCONF $CONFIG xfer_dir)
 
-crawljob=$($BIN/config.py $CONFIG crawljob)
-compact_names=$($BIN/config.py $CONFIG compact_names)
-warc_naming=$($BIN/config.py $CONFIG WARC_naming)
+# crawljob is used in description
+crawljob=$($GETCONF $CONFIG crawljob)
+compact_names=$($GETCONF $CONFIG compact_names)
+warc_naming=$($GETCONF $CONFIG WARC_naming)
 if ((compact_names)); then
     WARC_NAME_PATTERN='{prefix}-{timestamp}-{serial}'
 else
@@ -422,10 +370,8 @@ do
   BUCKET_OK="$d/BUCKET_OK"
   tmpfile="/var/tmp/curl.out.$$"
 
-  #warc_series=`echo $d | egrep -o '/([^/]*)$' | tr -d "/"`
   warc_series=$(basename $d)
-  crawler=`echo $warc_series | awk -v FS=- '{print $NF}'`
-  #crawler=`echo $warc_series | tr '-' ' ' | awk '{print $NF}'`
+  #crawler=`echo $warc_series | awk -v FS=- '{print $NF}'`
   crawldata="$d"
 
   # handle (5xx) RETRY file
@@ -545,65 +491,66 @@ do
   secret_key=`grep secret_key $S3CFG | awk '{print $3}'`
 
   # parse config
-  title_prefix=`$BIN/config.py $CONFIG title_prefix`
-  # test_suffix=`$BIN/config.py $CONFIG test_suffix`
-  block_delay=`$BIN/config.py $CONFIG block_delay`
-  max_block_count=`$BIN/config.py $CONFIG max_block_count`
-  retry_delay=`$BIN/config.py $CONFIG retry_delay`
+  title_prefix=`$GETCONF $CONFIG title_prefix`
+  block_delay=`$GETCONF $CONFIG block_delay`
+  max_block_count=`$GETCONF $CONFIG max_block_count`
+  retry_delay=`$GETCONF $CONFIG retry_delay`
 
   # parse series
   #ws_date=`echo $warc_series | cut -d '-' -f 2`
   #cdate=`echo ${ws_date:0:6}`
 
   # bucket metadata
-  bucket="${warc_series}${test_suffix}"
-  mediatype='web'
+  bucket=${warc_series}
   title="${title_prefix} ${date_range}"
-  subject='crawldata'
-  derive=`$BIN/config.py $CONFIG derive`
+  derive=$($GETCONF $CONFIG derive)
 
   num_warcs=${nfiles_manifest}
   size_hint=`cat $PACKED | awk '{print $NF}'`
   first_serial=$(parse_warc_name "$(basename "$first_file")"; echo $serial)
   last_serial=$(parse_warc_name "$(basename "$last_file")"; echo $serial)
-  # if [ $compact_names == 1 ]
-  # then
-  #     first_serial=`echo $first_file\
-  # 	| cut -d '-' -f 3 | sed -e 's/.warc.gz//'`
-  #     last_serial=` echo $last_file\
-  # 	| cut -d '-' -f 3 | sed -e 's/.warc.gz//'`
-  # else
-  #     first_serial=`echo $warc_series | cut -d '-' -f 3`
-  #     last_serial=` echo $warc_series | cut -d '-' -f 4`
-  # fi
 
   # metadata per BK, intended to be like books
   #   Subject: metadata for the web stuff going into the paired archive
   #   Date:  2010-09-18T12:16:00PDT
-  scanner=`hostname -f`
-  creator=`$BIN/config.py $CONFIG creator`
-  sponsor=`$BIN/config.py $CONFIG sponsor`
-  contributor=`$BIN/config.py $CONFIG contributor`
+  metadata=()
+  while read m; do
+      metadata+=("$m")
+  done < <( $GETCONF $CONFIG -m metadata )
   # scandate (using 14-digits of timestamp of first warc in series)
   # metadate (like books, the year)
-  operator=`$BIN/config.py $CONFIG operator`
-  scancenter=`$BIN/config.py $CONFIG scanningcenter`
-  access="http://www.archive.org/details/${bucket}"
   crawler_version=$(warc_software ${files[0]})
-  description=`$BIN/config.py $CONFIG description\
+  description=`$GETCONF $CONFIG description\
     | sed -e s/CRAWLHOST/$scanner/\
       -e s/CRAWLJOB/$crawljob/\
       -e s/START_DATE/"$start_date_HR"/\
       -e s/END_DATE/"$end_date_HR"/\
     | tr -s ' '`
 
+  metadata+=(
+      "x-archive-meta-scanner:${scanner}"
+      "x-archive-meta-access:http://archive.org/details/${bucket}"
+      "x-archive-meta-crawler:${crawler_version}"
+      "x-archive-meta-title:${title}"
+      "x-archive-meta-description:${description}"
+      "x-archive-meta-scandate:${scandate}"
+      "x-archive-meta-date:${metadate}"
+      "x-archive-meta-crawljob:${crawljob}"
+      "x-archive-meta-numwarcs:${num_warcs}"
+      "x-archive-meta-sizehint:${size_hint}"
+      "x-archive-meta-firstfileserial:${first_serial}"
+      "x-archive-meta-firstfiledate:${first_file_date}"
+      "x-archive-meta-lastfileserial:${last_serial}"
+      "x-archive-meta-lastfiledate:${last_file_date}"
+      "x-archive-meta-lastdate:${last_date}"
+  )
   # support multiple arbitrary collections
   # webwidecrawl/collection/serial
   #   => collection3 = webwidecrawl
   #   => collection2 = collection
   #   => collection1 = serial
   COLLECTIONS=()
-  colls=($($BIN/config.py $CONFIG collections | tr '/' ' '))
+  colls=($($GETCONF $CONFIG collections | tr '/' ' '))
   coll_count=${#colls[@]}
   for c in ${colls[@]}
   do
@@ -618,39 +565,44 @@ do
       ((coll_count--))
   done
 
-  if [ -z "$creator" -o -z "$sponsor" -o -z "$contributor" -o \
-       -z "$description" -o -z "$scancenter" -o -z "$operator" ]; then
-      echo "ERROR some null metadata." | tee -a $OPEN
-      echo "Aborting." | tee -a $OPEN
-      exit 1          
-  fi
+  #if [ -z "$creator" -o -z "$sponsor" -o -z "$contributor" -o \
+  #     -z "$description" -o -z "$scancenter" -o -z "$operator" ]; then
+  #    echo "ERROR some null metadata." | tee -a $OPEN
+  #    echo "Aborting." | tee -a $OPEN
+  #    exit 1          
+  #fi
 
   echo "[item metadata]"
-  echo "  mediatype     = $mediatype"
-  echo "  title         = $title"
-  echo "  description   = $description"
-  echo "  collection(s) = ${collection[@]}"
-  echo "  subject       = $subject"
-  echo "[books metadata]"
-  echo "  scanningcenter = '${scancenter}'"
-  echo "  scandate       = '${scandate}'"
-  echo "  scanner        = '${scanner}'"
-  echo "  date           = '${metadate}'"
-  echo "  creator        = '${creator}'"
-  echo "  sponsor        = '${sponsor}'"
-  echo "  contributor    = '${contributor}'"
-  echo "  operator       = '${operator}'"
-  echo "  id...-access   = '${access}'"
-  echo "[crawl metadata]"
-  echo "  crawler         = ${crawler_version}"
-  echo "  crawljob        = $crawljob"
-  echo "  numwarcs        = $num_warcs"
-  echo "  sizehint        = $size_hint"
-  echo "  firstfileserial = $first_serial"
-  echo "  firstfiledate   = $first_file_date"
-  echo "  lastfileserial  = $last_serial"
-  echo "  lastfiledate    = $last_file_date"
-  echo "  lastdate        = $last_date"
+  for m in "${metadata[@]}"; do
+      m=${m#x-archive-meta*-} m=${m/:/ = }
+      echo "  $m"
+  done
+  # echo "[item metadata]"
+  # echo "  mediatype     = $mediatype"
+  # echo "  title         = $title"
+  # echo "  description   = $description"
+  # echo "  collection(s) = ${collection[@]}"
+  # echo "  subject       = $subject"
+  # echo "[books metadata]"
+  # echo "  scanningcenter = '${scancenter}'"
+  # echo "  scandate       = '${scandate}'"
+  # echo "  scanner        = '${scanner}'"
+  # echo "  date           = '${metadate}'"
+  # echo "  creator        = '${creator}'"
+  # echo "  sponsor        = '${sponsor}'"
+  # echo "  contributor    = '${contributor}'"
+  # echo "  operator       = '${operator}'"
+  # echo "  id...-access   = '${access}'"
+  # echo "[crawl metadata]"
+  # echo "  crawler         = ${crawler_version}"
+  # echo "  crawljob        = $crawljob"
+  # echo "  numwarcs        = $num_warcs"
+  # echo "  sizehint        = $size_hint"
+  # echo "  firstfileserial = $first_serial"
+  # echo "  firstfiledate   = $first_file_date"
+  # echo "  lastfileserial  = $last_serial"
+  # echo "  lastfiledate    = $last_file_date"
+  # echo "  lastdate        = $last_date"
 
   if [ $force == 0 ]; then query_user; fi
 
@@ -665,30 +617,10 @@ do
   noderive_opts=(--header 'x-archive-queue-derive:0')
   automakebucket_opts=(--header 'x-amz-auto-make-bucket:1')
   sizehint_opts=(--header "x-archive-size-hint:${size_hint}")
-  itemmeta_opts=(
-      --header "x-archive-meta-mediatype:${mediatype}"
-      --header "x-archive-meta-title:${title}"
-      --header "x-archive-meta-description:${description}"
-      --header "x-archive-meta-subject:${subject}"
-      --header "x-archive-meta-scanner:${scanner}"
-      --header "x-archive-meta-creator:${creator}"
-      --header "x-archive-meta-scandate:${scandate}"
-      --header "x-archive-meta-date:${metadate}"
-      --header "x-archive-meta-sponsor:${sponsor}"
-      --header "x-archive-meta-contributor:${contributor}"
-      --header "x-archive-meta-scanningcenter:${scancenter}"
-      --header "x-archive-meta-operator:${operator}"
-      --header "x-archive-meta-identifier-access:${access}"
-      --header "x-archive-meta-crawler:${crawler_version}"
-      --header "x-archive-meta-crawljob:${crawljob}"
-      --header "x-archive-meta-numwarcs:${num_warcs}"
-      --header "x-archive-meta-sizehint:${size_hint}"
-      --header "x-archive-meta-firstfileserial:${first_serial}"
-      --header "x-archive-meta-firstfiledate:${first_file_date}"
-      --header "x-archive-meta-lastfileserial:${last_serial}"
-      --header "x-archive-meta-lastfiledate:${last_file_date}"
-      --header "x-archive-meta-lastdate:${last_date}"
-  )
+  itemmeta_opts=()
+  for m in "${metadata[@]}"; do
+      itemmeta_opts+=(--header "$m")
+  done
 
   filepath=$MANIFEST
   filename="$(basename $filepath).txt"
@@ -722,8 +654,6 @@ do
       fi
       echo "item/bucket created successfully: $bucket" | tee -a $OPEN
   fi
-  #abort_series=0
-  #bad_etag=0
 
   # 2) run HEAD on item URL to make sure item is ready
   # item creation request above may be sitting in the queue for a while.
@@ -803,10 +733,9 @@ do
   # /CURL S3 <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
   # write success, tombstone files
-  if [ $TEST == "false" ]
-  then
-      write_success
-  fi
+  #if [ $mode != test ]; then
+      write_success $d
+  #fi
 
   # unlock process
   echo "mv open file to LAUNCH: $LAUNCH"
@@ -819,8 +748,7 @@ do
   (( launch_count++ ))
 
   # check mode
-  if [ $mode == 'single' ]
-  then
+  if [ $mode == 'single' -o $mode = test ]; then
     echo "$launch_count buckets filled"
     echo "mode = $mode, exiting normally."
     echo `basename $0` "done." `date`

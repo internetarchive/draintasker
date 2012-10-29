@@ -76,8 +76,14 @@ class DrainConfig(object):
         self.__check('title_prefix', lambda x: x != 'TBD Crawldata',
                      'is invalid')
         # creator, sponsor, contributor, scanningcenter not null
+        metadata = self.get_param('metadata')
         for key in ('creator','sponsor','contributor','scanningcenter'):
-            self.__check(key, lambda x: x is not None, 'is missing')
+            #self.__check(key, lambda x: x is not None, 'is missing')
+            # these metadata has been moved to "metadata" submap, which
+            # automatically incorporates values from old parameters.
+            if not metadata.get(key, None):
+                raise ValueError, '%s is missing' % key
+
         # derive is int
         self.check_integer('derive')
         # compact_names is int
@@ -108,6 +114,54 @@ class DrainConfig(object):
             return os.path.join(self.get_param('job_dir'), 'DRAINME')
         if param == 'config':
             return os.path.abspath(self.fname)
+        if param == 'collections':
+            # allow a few different formats
+            v = self.cfg[param]
+            if isinstance(v, list):
+                # lower collection first (IA convention)
+                return '/'.join(reversed(v))
+            if isinstance(v, basestring) and v.find(';') >= 0:
+                # IA-conventional one-string notation
+                return '/'.join(reversed(v.split(';')))
+            return v
+        if param == 'scanner':
+            if param in self.cfg:
+                return self.cfg[param]
+            else:
+                return os.uname()[1]
+        if param == 'metadata':
+            # for backward-compatibility, incorporate top-level
+            # metadata config parameters into metadata dict.
+            # templated/auto-generated metadata, such as title, description
+            # and scandate, are not included, because they are handled
+            # specially. TODO: they should be unified into a single framework.
+            # mediatype and subject used to be hard-coded. now they are
+            # configurable with sensible default values.
+            v = self.cfg[param]
+            if v is None or not isinstance(v, dict):
+                # TODO: we should warn/abort if v is not a dict
+                v = {}
+            # TODO: which metadata to include by default would depend on
+            # item's mediatype.
+            meta = dict(
+                [(name, self.cfg[name])
+                for name in (
+                    'creator',
+                    'sponsor',
+                    'contributor',
+                    'operator',
+                    'scanningcenter'
+                    )
+                if name in self.cfg
+                ], mediatype='web', subject='crawldata',
+                scanner=self['scanner'])
+            # values in "metadata" param take precedence over top-level
+            # metadata.
+            v = self.cfg[param]
+            if isinstance(v, dict):
+                meta.update(v)
+            return meta
+                
         return self.cfg.get(param)
 
     def iteritems(self):
@@ -116,20 +170,55 @@ class DrainConfig(object):
         """
         return self.cfg.iteritems()
 
-    def pprint(self):
-        pprint.pprint(self.cfg)
+    def pprint(self, param=None, format=None, out=sys.stdout):
+        if param is None:
+            pprint.pprint(self.cfg, stream=out)
+        else:
+            v = self.get_param(param)
+            if isinstance(v, dict):
+                if format == 'header':
+                    for key, value in v.iteritems():
+                        if re.search(r'\s', key): continue
+                        if value is None or value == '': continue
+                        for s in format_header(key, value):
+                            print >>out, s
+                else:
+                    for key, value in v.iteritems():
+                        # space in key screws up, so drop it
+                        if re.search(r'\s', key): continue
+                        if value is None:
+                            print >>out, "%s\t"
+                        elif isinstance(value, list):
+                            print >>out, "%s\t%s" % (key, ';'.join(value))
+                        else:
+                            print >>out, "%s\t%s" % (key, value)
+            elif isinstance(v, list):
+                for value in v:
+                    print >>out, value
+            else:
+                print >>out, v if v is not None else ''
         
+def format_header(k, v):
+    if isinstance(v, list):
+        for i, v1 in enumerate(v):
+            yield 'x-archive-meta%02d-%s:%s' % (i+1, k, v1)
+    else:
+        yield 'x-archive-meta-%s:%s' % (k, v if v is not None else '')
+            
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        """ usage """
+    from optparse import OptionParser
+    opt = OptionParser()
+    opt.add_option('-f', dest='format', default=None)
+    opt.add_option('-m', action='store_const', dest='format', const='header',
+                   help='equivalent of -f header')
+    options, args = opt.parse_args()
+    if len(args) < 1:
         print os.path.basename(__file__),  __doc__, __author__
         sys.exit(1)
     else:
-        """ process args """
-        config = DrainConfig(sys.argv[1])
-        if len(sys.argv) == 2:
+        config = DrainConfig(args[0])
+        if len(args) == 1:
             if config.validate():
                 config.pprint()
-        elif len(sys.argv) == 3:
-            v = config.get_param(sys.argv[2])
-            print v if v is not None else ''
+        elif len(args) == 2:
+            config.pprint(param=args[1], format=options.format)
