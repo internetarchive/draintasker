@@ -343,6 +343,7 @@ xfer_job_dir=$($GETCONF $CONFIG xfer_dir)
 
 # crawljob is used in description
 crawljob=$($GETCONF $CONFIG crawljob)
+crawlhost=$($GETCONF $CONFIG crawlhost)
 compact_names=$($GETCONF $CONFIG compact_names)
 warc_naming=$($GETCONF $CONFIG WARC_naming)
 if ((compact_names)); then
@@ -521,14 +522,13 @@ do
   # metadate (like books, the year)
   crawler_version=$(warc_software ${files[0]})
   description=`$GETCONF $CONFIG description\
-    | sed -e s/CRAWLHOST/$scanner/\
+    | sed -e s/CRAWLHOST/$crawlhost/\
       -e s/CRAWLJOB/$crawljob/\
       -e s/START_DATE/"$start_date_HR"/\
       -e s/END_DATE/"$end_date_HR"/\
     | tr -s ' '`
 
   metadata+=(
-      "x-archive-meta-scanner:${scanner}"
       "x-archive-meta-access:http://archive.org/details/${bucket}"
       "x-archive-meta-crawler:${crawler_version}"
       "x-archive-meta-title:${title}"

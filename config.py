@@ -124,11 +124,13 @@ class DrainConfig(object):
                 # IA-conventional one-string notation
                 return '/'.join(reversed(v.split(';')))
             return v
-        if param == 'scanner':
-            if param in self.cfg:
-                return self.cfg[param]
-            else:
-                return os.uname()[1]
+        if param == 'crawlhost':
+            # used in place of CRAWLHOST placeholder in description template.
+            # let metadata.scanner override default hostname.
+            md = self.cfg.get('metadata')
+            if md and 'scanner' in md:
+                return md['scanner']
+            return os.uname()[1]
         if param == 'metadata':
             # for backward-compatibility, incorporate top-level
             # metadata config parameters into metadata dict.
@@ -137,10 +139,6 @@ class DrainConfig(object):
             # specially. TODO: they should be unified into a single framework.
             # mediatype and subject used to be hard-coded. now they are
             # configurable with sensible default values.
-            v = self.cfg[param]
-            if v is None or not isinstance(v, dict):
-                # TODO: we should warn/abort if v is not a dict
-                v = {}
             # TODO: which metadata to include by default would depend on
             # item's mediatype.
             meta = dict(
@@ -154,12 +152,13 @@ class DrainConfig(object):
                     )
                 if name in self.cfg
                 ], mediatype='web', subject='crawldata',
-                scanner=self['scanner'])
+                scanner=os.uname()[1])
             # values in "metadata" param take precedence over top-level
             # metadata.
-            v = self.cfg[param]
+            v = self.cfg.get(param)
             if isinstance(v, dict):
                 meta.update(v)
+            # TODO: we should warn/abort if v is not a dict
             return meta
                 
         return self.cfg.get(param)
