@@ -113,7 +113,7 @@ function warc_software {
     if [[ $1 =~ \.gz$ ]]; then
 	cat=zcat
     fi
-    $cat $1 2>/dev/null | awk '/^software:/{ print $2 } NR>1&&/^WARC[/]/{ exit }'
+    $cat $1 2>/dev/null | awk '/^software:/{ print $2 } NR>1&&/^WARC\//{ exit }'
 }
 	
 function echo_curl_output {
