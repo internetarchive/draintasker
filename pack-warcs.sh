@@ -187,7 +187,7 @@ echo "  OPEN             = $open"
 echo "  mode             = $mode"
 echo "  compactify       = $compactify"
 
-if [ $force -ne 1 ]; then query_user; fi
+if [ "$force" -ne 1 ]; then query_user; fi
 
 # abort packing when less than max_GB warcs and no FINISH_DRAIN
 if [ ! -f $FINISH_DRAIN ]; then
