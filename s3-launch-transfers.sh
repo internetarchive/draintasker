@@ -211,6 +211,7 @@ function schedule_retry {
 
 function curl_fake {
     printf '\n>>> THIS IS ONLY A TEST!<<<\n\n' >&2
+    echo '#' curl "${@}" >&2
     sleep 5
     # [response_code] [size_upload] [time_total]
     echo "200 000 000"
@@ -344,17 +345,8 @@ xfer_job_dir=$($GETCONF $CONFIG xfer_dir)
 # crawljob is used in description
 crawljob=$($GETCONF $CONFIG crawljob)
 crawlhost=$($GETCONF $CONFIG crawlhost)
-compact_names=$($GETCONF $CONFIG compact_names)
-warc_naming=$($GETCONF $CONFIG WARC_naming)
-if ((compact_names)); then
-    WARC_NAME_PATTERN='{prefix}-{timestamp}-{serial}'
-else
-    if ((warc_naming==1)); then
-	WARC_NAME_PATTERN='{prefix}-{timestamp}-{serial}-{host}'
-    else
-	WARC_NAME_PATTERN='{prefix}-{timestamp}-{serial}-{pid}~{host}~{port}'
-    fi
-fi
+WARC_NAME_PATTERN=$($GETCONF $CONFIG warc_name_pattern_upload)
+
 for d in $(find $xfer_job_dir -mindepth 1 -maxdepth 1 -type d | sort)
 do
   PACKED="$d/PACKED"

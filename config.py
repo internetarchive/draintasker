@@ -53,9 +53,12 @@ class DrainConfig(object):
         if self.cfg['max_size'] > MAX_ITEM_SIZE_GB:
             raise ValueError, "max_size=%d exceeds MAX_ITEM_SIZE_GB=%d" % (
                 self.cfg['max_size'], MAX_ITEM_SIZE_GB)
-        # WARC_naming = {1, 2}
-        self.__check('WARC_naming', lambda x: x in (1, 2),
+        # WARC_naming = 1, 2 or a string
+        self.__check('WARC_naming',
+                     lambda x: x in (1, 2) or isinstance(x, basestring),
                      'must be 1 or 2')
+        self.validate_naming()
+
         self.check_integer('block_delay')
         self.check_integer('retry_delay')
 
@@ -76,7 +79,7 @@ class DrainConfig(object):
         self.__check('title_prefix', lambda x: x != 'TBD Crawldata',
                      'is invalid')
         # creator, sponsor, contributor, scanningcenter not null
-        metadata = self.get_param('metadata')
+        metadata = self['metadata']
         for key in ('creator','sponsor','contributor','scanningcenter'):
             #self.__check(key, lambda x: x is not None, 'is missing')
             # these metadata has been moved to "metadata" submap, which
@@ -91,8 +94,33 @@ class DrainConfig(object):
 
         return True
 
+    def validate_naming(self):
+        """validate naming WARC filename pattern and item name template.
+        """
+        wnpat = self.warc_name_pattern
+        intmp = self.item_name_template
+
+        # all the fields referenced in intmp must either be defined in
+        # wnpat, or be derivable from them.
+        fields_in_wnpat = re.findall(r'\{([A-Za-z][A-Za-z0-9]*)\}', wnpat)
+        #print "fields_in_wnpat=%r" % fields_in_wnpat
+        defined_symbols = fields_in_wnpat + ['last'+s for s in fields_in_wnpat]
+        if 'host' in fields_in_wnpat:
+            defined_symbols.append('shost')
+            defined_symbols.append('lastshost')
+        undefined_symbols = []
+        for ref in re.findall(r'\{([A-Za-z][A-Za-z0-9]*)\}', intmp):
+            if ref not in defined_symbols:
+                undefined_symbols.append(ref)
+        #print "undefined_symbols=%r" % undefined_symbols
+        if undefined_symbols:
+            raise ValueError, 'item_naming has undefined field(s): %s' % \
+                ', '.join(undefined_symbols)
+
     @property
     def warc_name_pattern(self):
+        """format of WARC files in job (incoming) directory.
+        """
         naming = self.get_param('WARC_naming')
         if naming == 1:
             return '{prefix}-{timestamp}-{serial}-{host}'
@@ -100,6 +128,33 @@ class DrainConfig(object):
             return '{prefix}-{timestamp}-{serial}-{pid}~{host}~{port}'
         else:
             return str(naming)
+
+    @property
+    def warc_name_pattern_upload(self):
+        """format of WARC files in item directory (which is the name
+        WARC files are uploaded to the storage.)
+        """
+        if self.get_param('compact_names'):
+            # WARCs in item dir have been renamed to this format
+            return '{prefix}-{timestamp}-{serial}'
+        else:
+            return self.warc_name_pattern
+
+    @property
+    def item_name_template(self):
+        naming = self.get_param('item_naming')
+        if naming is None:
+            if self.get_param('compact_names'):
+                naming = '{prefix}-{timestamp14}{suffix}-{shost}'
+            else:
+                naming = '{prefix}-{timestamp}-{serial}-{lastserial}-{shost}'
+        return naming
+
+    @property
+    def item_name_template_sh(self):
+        tmpl = self.item_name_template
+        return re.sub(r'\{[A-Za-z][_0-9A-Za-z]*\}',
+                      lambda m: '$'+m.group(0), tmpl)
 
     def get_param(self, param):
         return self[param]
@@ -110,6 +165,12 @@ class DrainConfig(object):
                     os.path.dirname(self.fname), self.cfg[param]))
         if param == 'warc_name_pattern':
             return self.warc_name_pattern
+        if param == 'warc_name_pattern_upload':
+            return self.warc_name_pattern_upload
+        if param == 'item_name_template':
+            return self.item_name_template
+        if param == 'item_name_template_sh':
+            return self.item_name_template_sh
         if param == 'drainme':
             return os.path.join(self.get_param('job_dir'), 'DRAINME')
         if param == 'config':

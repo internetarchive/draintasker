@@ -82,11 +82,12 @@ function compactify_target {
 }
 
 function make_item_name {
-  parse_warc_name "$1" f_
-  parse_warc_name "$2" l_
-  local prefix=${f_prefix} shost=${f_shost}
-  local timestamp=${f_timestamp} timestamp14=${f_timestamp:0:14}
-  local serial=${f_serial} lastserial=${l_serial}
+  parse_warc_name "$1" ''
+  parse_warc_name "$2" last
+  #local prefix=${f_prefix} host=${f_host} shost=${f_shost}
+  #local timestamp=${f_timestamp} timestamp14=${f_timestamp:0:14}
+  local timestamp14=${timestamp:0:14} lasttimestamp14=${lasttimestamp:0:14}
+  #local serial=${f_serial} lastserial=${l_serial}
   eval echo $ITEM_NAME_TEMPLATE
 }
 
@@ -120,32 +121,18 @@ mode=${3:-single}
 job_dir=$($BIN/config.py $CONFIG job_dir)
 xfer_home=$($BIN/config.py $CONFIG xfer_dir)
 max_GB=$($BIN/config.py $CONFIG max_size)
-warc_naming=$($BIN/config.py $CONFIG WARC_naming)
-item_naming=$($BIN/config.py $CONFIG item_naming)
 compactify=$($BIN/config.py $CONFIG compact_names)
-if [ -z $item_naming ]; then
-    if ((compactify)); then
-	item_naming='{prefix}-{timestamp14}{suffix}-{shost}'
-    else
-	item_naming='{prefix}-{timestamp}-{serial}-{lastserial}-{shost}'
-    fi
-fi
-ITEM_NAME_TEMPLATE=$(sed -e 's/{\(prefix\|timestamp\(14\|\)\|\(last\|\)serial\|shost\|suffix\)}/$&/g' <<<"$item_naming")
+WARC_NAME_PATTERN="$($BIN/config.py $CONFIG warc_name_pattern)"
+item_naming="$($BIN/config.py $CONFIG item_name_template)"
+ITEM_NAME_TEMPLATE="$($BIN/config.py $CONFIG item_name_template_sh)"
 
 if [ ! -d $job_dir ]; then
   echo "ERROR: job_dir not found: $job_dir"
   exit 1
 fi
-if [ $warc_naming = 1 ]; then
-  WARC_NAME_PATTERN='{prefix}-{timestamp}-{serial}-{host}'
-else
-  WARC_NAME_PATTERN='{prefix}-{timestamp}-{serial}-{pid}~{host}~{port}'
-fi
 
-std_warc_size=$(( 1024 * 1024 * 1024 )) # 1 gibibyte
-max_size=$(( max_GB * std_warc_size ))
+max_size=$(( max_GB * 1024 * 1024 * 1024 ))
 warc_series=''
-warcs_per_series=$(( max_size / std_warc_size ))
 
 # check for warcvalidator on path ($WARC_TOOLS/app/warcvalidator)
 # 
@@ -170,20 +157,16 @@ for w in $(find $job_dir -maxdepth 1 -regex "${WARC_NAME_RE_FIND}"); do
     ((total_num_warcs++))
     ((total_size_warcs += $(stat -c %s $w)))
 done
-est_num_series=$(( total_num_warcs / warcs_per_series )) 
 
 echo "  job_dir          = $job_dir"
 echo "  xfer_home        = $xfer_home"
-echo "  warc_naming      = $warc_naming"
-echo "  std_warc_size    = $std_warc_size (1GB)"
+echo "  warc_naming      = $WARC_NAME_PATTERN"
+echo "  item_naming      = $item_naming"
 echo "  max_series_size  = $max_size (${max_GB}GB)"
-echo "  warcs_per_series = $warcs_per_series"
 echo "  total_num_warcs  = $total_num_warcs"
 echo "  total_size_warcs = $total_size_warcs"
-echo "  est_num_series   = $est_num_series (estimated)"
 echo "  FINISH_DRAIN     = $FINISH_DRAIN"
 echo "  OPEN             = $open"
-#echo "  PACKED           = $PACKED"
 echo "  mode             = $mode"
 echo "  compactify       = $compactify"
 
