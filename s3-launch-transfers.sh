@@ -212,7 +212,6 @@ function schedule_retry {
 function curl_fake {
     printf '\n>>> THIS IS ONLY A TEST!<<<\n\n' >&2
     echo '#' curl "${@}" >&2
-    sleep 5
     # [response_code] [size_upload] [time_total]
     echo "200 000 000"
 }
@@ -680,7 +679,8 @@ do
   do
       filepath=${files[$i]}
       filename=$(basename "$filepath")
-      checksum=`grep $filename $MANIFEST | awk '{print $1}'`
+      checksum=$(awk -v FN="${filename}" '$2==FN{print $1}' $MANIFEST)
+      #checksum=`grep $filename $MANIFEST | awk '{print $1}'`
       download="http://${dl}/${bucket}/${filename}"
       tombstone="${filepath}.tombstone"
       retry_count=0
