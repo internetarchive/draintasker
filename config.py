@@ -108,6 +108,10 @@ class DrainConfig(object):
         if 'host' in fields_in_wnpat:
             defined_symbols.append('shost')
             defined_symbols.append('lastshost')
+        if 'timestamp' in fields_in_wnpat:
+            defined_symbols.append('timestamp14')
+            defined_symbols.append('lasttimestamp14')
+        defined_symbols.append('suffix')
         undefined_symbols = []
         for ref in re.findall(r'\{([A-Za-z][A-Za-z0-9]*)\}', intmp):
             if ref not in defined_symbols:
