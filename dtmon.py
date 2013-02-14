@@ -421,6 +421,8 @@ class UpLoader:
         self.home = home
         if self.home is None:
             self.home = os.path.dirname(__file__)
+        self.home = os.path.abspath(self.home)
+
         self.prefix = prefix
         self.DT_LAUNCH_TRANSFERS = self.__cmd('s3-launch-transfers.sh')
         self.DT_PACK_WARCS = self.__cmd('pack-warcs.sh')
