@@ -153,6 +153,31 @@ open="$job_dir/PACKED.open"
 FINISH_DRAIN="$job_dir/FINISH_DRAIN"
 total_num_warcs=0
 total_size_warcs=0
+
+# lock this process
+if [ -e $open ]; then
+  pid=$(head -1 $open)
+  if [[ $pid =~ ^[0-9]+$ ]]; then
+    if ps -p $pid >/dev/null 2>&1; then
+      echo "OPEN file exists: $open (PID=$pid)"
+      echo $(basename $0) done. $(date)
+      exit 0
+    else
+      echo "Removing stale $open (PID=$pid)"
+    fi
+  else
+    echo "OPEN file exists: $open (PID unknown)"
+    echo $(basename $0) done. $(date)
+    exit 0
+  fi
+fi
+trap unlock_job_dir EXIT
+echo "creating file: $open"
+echo $$ > $open || {
+  echo "could not touch OPEN file: $open"
+  exit 1
+}
+
 for w in $(find $job_dir -maxdepth 1 -regex "${WARC_NAME_RE_FIND}"); do
     ((total_num_warcs++))
     ((total_size_warcs += $(stat -c %s $w)))
@@ -178,19 +203,6 @@ if [ ! -f $FINISH_DRAIN ]; then
     echo $(basename $0) "too few WARCs and FINISH_DRAIN file not found, exiting normally"
     exit 0
   fi
-fi
-
-# lock this process
-if [ -e $open ]; then
-  echo "OPEN file exists: $open"
-  exit 0
-else
-  trap unlock_job_dir EXIT
-  echo "creating file: $open"
-  touch $open || {
-    echo "could not touch OPEN file: $open"
-    exit 1
-  }
 fi
 
 warc_count=0
