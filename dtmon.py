@@ -16,6 +16,8 @@ import config, utils
 import re
 import subprocess
 import time
+import threading
+import signal
 from tempfile import NamedTemporaryFile
 from datetime import datetime
 try:
@@ -433,6 +435,8 @@ class UpLoader:
         for pj in self.projects:
             pj.loadconfig()
 
+        self.wakeupcond = threading.Condition()
+
     def __cmd(self, name):
         return os.path.join(self.home, (self.prefix or '') + name)
 
@@ -456,8 +460,13 @@ class UpLoader:
                 if not once:
                     print "sleeping %ds" % sleep_time
                     sys.stdout.flush()
-                    time.sleep(sleep_time)
+                    with self.wakeupcond:
+                        self.wakeupcond.wait(timeout=sleep_time)
             if once: break
+
+    def wakeup(self):
+        with self.wakeupcond:
+            self.wakeupcond.notify()
 
 if __name__ == "__main__":
     from optparse import OptionParser
@@ -495,7 +504,9 @@ if __name__ == "__main__":
         opt.error('%s is a directory' % args[0])
 
     dt = UpLoader(configs, sleep=options.interval, prefix=options.prefix)
-    # utils.reflect(dt)
+
+    signal.signal(signal.SIGUSR1, lambda sig, st: dt.wakeup())
+
     if options.run_http_server:
         import admin
         try:
