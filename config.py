@@ -19,6 +19,7 @@ MAX_ITEM_SIZE_GB = 10
 def is_alnum(x): return x.isalnum()
 def is_integer(x): return type(x) == int
 def is_name(x): return re.match(r'[-_a-zA-Z0-9]+$', x)
+def is_boolean(x): return isinstance(x, (bool, int, long))
 
 class DrainConfig(object):
     def __init__(self, fname):
@@ -259,6 +260,8 @@ class DrainConfig(object):
             elif isinstance(v, list):
                 for value in v:
                     print >>out, value
+            elif isinstance(v, bool):
+                print >>out, int(v)
             else:
                 print >>out, v if v is not None else ''
         

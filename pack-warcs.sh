@@ -125,6 +125,7 @@ compactify=$($BIN/config.py $CONFIG compact_names)
 WARC_NAME_PATTERN="$($BIN/config.py $CONFIG warc_name_pattern)"
 item_naming="$($BIN/config.py $CONFIG item_name_template)"
 ITEM_NAME_TEMPLATE="$($BIN/config.py $CONFIG item_name_template_sh)"
+verify_gzip=$($BIN/config.py $CONFIG verify_gzip)
 
 if [ ! -d $job_dir ]; then
   echo "ERROR: job_dir not found: $job_dir"
@@ -219,7 +220,7 @@ for w in $(find $job_dir -maxdepth 1 -regex "${WARC_NAME_RE_FIND}" | sort)
 do 
   if [[ $w =~ \.gz$ ]]; then
     # check gzip container
-    if [ "$mode" != test ]; then
+    if [ "$mode" != test -a "$verify_gzip" != 0 ]; then
       echo "  verifying gz: $(basename $w)"
       gzip -t $w > /dev/null || {
 	echo "ERROR: bad gzip, skipping file: $w"
