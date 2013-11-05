@@ -520,7 +520,7 @@ do
     | tr -s ' '`
 
   metadata+=(
-      "x-archive-meta-access:http://archive.org/details/${bucket}"
+      "x-archive-meta-identifier-access:https://archive.org/details/${bucket}"
       "x-archive-meta-crawler:${crawler_version}"
       "x-archive-meta-title:${title}"
       "x-archive-meta-description:${description}"
