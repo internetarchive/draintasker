@@ -67,9 +67,9 @@ class DrainConfig(object):
         if re.search("{describe_effort}", self.cfg['description']):
             raise ValueError, "desription must not contain "\
                 + "'{describe_effort}'"
-        for key in ('CRAWLHOST','CRAWLJOB','START_DATE','END_DATE'):
-            if not re.search(key, self.cfg['description']):
-                raise ValueError, "description must contain placeholder " + key
+        #for key in ('CRAWLHOST','CRAWLJOB','START_DATE','END_DATE'):
+        #    if not re.search(key, self.cfg['description']):
+        #        raise ValueError, "description must contain placeholder " + key
         # operator not tbd
         self.__check('operator', lambda x: x != 'tbd@archive.org',
                      'must be proper operator identifier')
