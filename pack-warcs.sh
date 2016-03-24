@@ -126,7 +126,10 @@ WARC_NAME_PATTERN="$($BIN/config.py $CONFIG warc_name_pattern)"
 item_naming="$($BIN/config.py $CONFIG item_name_template)"
 ITEM_NAME_TEMPLATE="$($BIN/config.py $CONFIG item_name_template_sh)"
 verify_gzip=$($BIN/config.py $CONFIG verify_gzip)
-
+SUFFIX_RE=$($BIN/config.py $CONFIG suffix_re)
+if [ -z "$SUFFIX_RE" ]; then
+    SUFFIX_RE='\.w?arc\(\.gz\)?'
+fi
 if [ ! -d $job_dir ]; then
   echo "ERROR: job_dir not found: $job_dir"
   exit 1
@@ -146,7 +149,6 @@ warc_series=''
 #   exit 2
 # fi
 
-SUFFIX_RE='\.w?arc\(\.gz\)?'
 WARC_NAME_RE="$(sed -e 's/{[^}]*}/\\(.*\\)/g' <<<"$WARC_NAME_PATTERN")"
 WARC_NAME_RE_FIND=".*/${WARC_NAME_RE}${SUFFIX_RE}"'$'
 
