@@ -528,20 +528,30 @@ do
 
   metadata+=(
       "x-archive-meta-identifier-access:https://archive.org/details/${bucket}"
-      "x-archive-meta-crawler:${crawler_version}"
       "x-archive-meta-title:${title}"
       "x-archive-meta-description:${description}"
       "x-archive-meta-scandate:${scandate}"
       "x-archive-meta-date:${metadate}"
-      "x-archive-meta-crawljob:${crawljob}"
-      "x-archive-meta-numwarcs:${num_warcs}"
       "x-archive-meta-sizehint:${size_hint}"
-      "x-archive-meta-firstfileserial:${first_serial}"
       "x-archive-meta-firstfiledate:${first_file_date}"
-      "x-archive-meta-lastfileserial:${last_serial}"
       "x-archive-meta-lastfiledate:${last_file_date}"
       "x-archive-meta-lastdate:${last_date}"
   )
+  if [ -n "$crawler_version" ]; then
+      metadata+=("x-archive-meta-crawler:${crawler_version}")
+  fi
+  if [ -n "$crawljob" ]; then
+      metadata+=("x-archive-meta-crawljob:${crawljob}")
+  fi
+  if [ -n "$num_warcs" ]; then
+      metadata+=("x-archive.meta-numwarcs:${num_warcs}")
+  fi
+  if [ -n "$first_serial" ]; then
+      metadata+=("x-archive-meta-firstfileserial:${first_serial}")
+  fi
+  if [ -n "$last_serial" ]; then
+      metadata+=("x-archive-meta-lastfileserial:${last_serial}")
+  fi
   # support multiple arbitrary collections
   # webwidecrawl/collection/serial
   #   => collection3 = webwidecrawl
