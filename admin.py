@@ -24,7 +24,8 @@ class WebUI(web.RequestHandler):
             self.send_error(404)
             return
         h = getattr(self, 'get_'+(action or 'index'), self.get_index)
-        if h: return h()
+        if h:
+            h()
         else:
             self.send_error(404)
 
