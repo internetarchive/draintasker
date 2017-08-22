@@ -12,7 +12,7 @@ import sys, os
 libdir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'lib'))
 if libdir not in sys.path:
     sys.path.append(libdir)
-import config, utils
+from drain import config, utils
 import re
 import subprocess
 import time
@@ -24,11 +24,8 @@ try:
     import pwd
 except:
     pwd = None
-
-class Storage(object):
-    def __init__(self, **kwds):
-        for k, v in kwds.iteritems():
-            setattr(self, k, v)
+from drain.utils import Storage
+from drain.drain import Series
 
 def readfile(fn):
     try:
@@ -38,7 +35,7 @@ def readfile(fn):
         return c
     except:
         return '?'
-    
+
 def getpids(excludes=[]):
     dir='/proc'
     for fn in os.listdir(dir):
@@ -95,133 +92,6 @@ def getstdout(pid):
     except:
         return None
 
-
-class Series(object):
-    def __init__(self, xfer, name):
-        self.xfer = xfer
-        self.name = name
-        self.path = os.path.join(self.xfer, self.name)
-        for f in ('RETRY','PACKED','MANIFEST','LAUNCH','TASK',
-                  'SUCCESS','ERROR','TOMBSTONE'):
-            setattr(self, f, os.path.join(self.path, f))
-        try:
-            st = os.stat(self.path)
-            self.mtime = st.st_mtime
-        except OSError:
-            self.mtime = 0
-
-    def has_file(self, file):
-        return os.path.isfile(os.path.join(self.xfer, self.name, file))
-    def read_file(self, file):
-        path = os.path.join(self.xfer, self.name, file)
-        try:
-            f = open(path)
-            c = f.read().rstrip()
-            f.close()
-            return c
-        except:
-            return '?'
-
-    def check_file(self, file):
-        if self.has_file(file): return file
-        file_open = file+'.open'
-        if self.has_file(file_open): return file_open
-        return None
-
-    @property
-    def warcs(self):
-        d = os.path.join(self.xfer, self.name)
-        count = 0
-        for fn in os.listdir(d):
-            if re.match(r'.*\.w?arc(\.gz)?$', fn):
-                count += 1
-        return count
-
-    @property
-    def warcs_done(self):
-        d = os.path.join(self.xfer, self.name)
-        count = 0
-        for fn in os.listdir(d):
-            if re.match(r'.*\.w?arc(\.gz)?\.tombstone$', fn):
-                count += 1
-        return count
-
-    @property
-    def packed(self):
-        return self.check_file('PACKED')
-    @property
-    def manifest(self):
-        return self.check_file('MANIFEST')
-    @property
-    def launch(self):
-        return self.check_file('LAUNCH')
-    @property
-    def task(self):
-        return self.check_file('TASK')
-    @property
-    def tombstone(self):
-        return self.check_file('TOMBSTONE')
-    @property
-    def success(self):
-        if self.has_file('SUCCESS'):
-            return 'SUCCESS'
-        else:
-            return None
-    @property
-    def error(self):
-        if self.has_file('ERROR'):
-            return 'ERROR'
-        else:
-            return None
-
-    @property
-    def retry(self):
-        if self.has_file('RETRY'):
-            return 'RETRY (%s)' % (self.read_file('RETRY'),)
-        else:
-            return None
-
-    @property
-    def status(self):
-        if self.has_file('SUCCESS'):
-            return 'completed'
-        if not os.path.isfile(self.RETRY):
-            if self.has_file('LAUNCH.open'): return 'running'
-            if self.has_file('MANIFEST.open'): return 'running'
-        return ''
-
-    def retryasap(self):
-        if os.path.isfile(self.SUCCESS):
-            return dict(ok=0, error='completed series')
-        if os.path.isfile(self.RETRY):
-            # RETRY file may get deleted by s3-launch-transfer.sh
-            # while running this code
-            try:
-                f = open(self.RETRY)
-                retrytime = f.read().rstrip()
-                f.close()
-                if len(retrytime) > 0:
-                    try:
-                        os.rename(self.RETRY, '%s.%s' % (self.RETRY, retrytime))
-                    except:
-                        pass
-            except:
-                pass
-                
-            retrytime = readfile(self.RETRY)
-            if retrytime != '?':
-                try:
-                    os.rename(self.RETRY, self.RETRY+'.'+str(retrytime))
-                except:
-                    pass
-        try:
-            f = open(self.RETRY, 'w')
-            f.write("0\n")
-            f.close()
-            return dict(ok=1)
-        except Exception as ex:
-            return dict(ok=0, error=str(ex))
-
 class Project(object):
     '''a class representing one drain project (for a drain.cfg)'''
     def __init__(self, id, config, manager):
@@ -242,7 +112,7 @@ class Project(object):
 
         # check if user has .ias3cfg - not used in Project,
         # but it is useful to give user an error in the early stage.
-        self.ias3cfg = os.environ["HOME"]+ "/.ias3cfg" 
+        self.ias3cfg = os.environ["HOME"]+ "/.ias3cfg"
         try:
             with open(self.ias3cfg, 'r'):
                 pass
@@ -257,7 +127,7 @@ class Project(object):
             return True
         else:
             return False
-        
+
     def loadconfig(self, force=False):
         if force or self.is_config_updated():
             self.configobj = config.DrainConfig(self.config_fname)
@@ -316,7 +186,7 @@ class Project(object):
         else:
             return Storage(exists=False, drainme=False, finishdrain=False,
                            free=0, avail=0)
-        
+
     def uploads(self):
         '''return upload serieses'''
         serieses = []
@@ -426,9 +296,6 @@ class UpLoader:
         self.home = os.path.abspath(self.home)
 
         self.prefix = prefix
-        self.DT_LAUNCH_TRANSFERS = self.__cmd('s3-launch-transfers.sh')
-        self.DT_PACK_WARCS = self.__cmd('pack-warcs.sh')
-        self.DT_DRAIN_JOB = self.__cmd('s3-drain-job.sh')
         self.projects = [Project(i, config, self) for i, config
                          in enumerate(configs)]
         #self.init_config(fname)
@@ -436,9 +303,6 @@ class UpLoader:
             pj.loadconfig()
 
         self.wakeupcond = threading.Condition()
-
-    def __cmd(self, name):
-        return os.path.join(self.home, (self.prefix or '') + name)
 
     def run(self, once=False):
         """ if DRAINME file exists, update config, drain job, sleep """
@@ -469,48 +333,40 @@ class UpLoader:
             self.wakeupcond.notify()
 
 if __name__ == "__main__":
-    from optparse import OptionParser
-    opt = OptionParser(usage='%prog [OPTIONS] DTMON.CFG', version='2.2')
-    opt.add_option('-p', '--http-port', action='store', dest='port', type='int',
-                   help='port number for built-in HTTP server',
-                   default='8321')
-    opt.add_option('--no-http', action='store_false', dest='run_http_server',
-                   help='disable built-in HTTP server',
-                   default=True)
-    opt.add_option('-i', '--interval', action='store', dest='interval',
-                   type='int', help='time in seconds to sleep between draining',
-                   default=None)
-    opt.add_option('-L', action='store', dest='logfile', default=None,
-                   help='after initial check, sends all output '
-                   ' (both stdout and stderr) of draintasker and all '
-                   ' its subprocesses to specified file.'
-                   ' if the file exists, output will be appended to it')
-    opt.add_option('--prefix', dest='prefix',
-                   default=os.environ.get('DTMON_PREFIX', ''),
-                   help='string to prepend to each sub-command '
-                   '(intended for test/development aid)')
-    opt.add_option('-1', '--once', action='store_true', dest='once',
-                   help='run each draining steps just once and exit'
-                   ' this option replaces running s3-drain-jobs.sh manually',
-                   default=False)
-
-    options, args = opt.parse_args()
-    if len(args) < 1:
-        opt.print_help(sys.stderr)
-        exit(1)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('config', metavar='DTMON.CFG')
+    parser.add_argument('-p', '--http-port', dest='port', type=int,
+            help='port number for built-in HTTP server', default=8321)
+    parser.add_argument('--no-http', action='store_const', dest='port',
+            const=-1, help='disable built-in HTTP server')
+    parser.add_argument('-i', '--interval', type=int,
+            help='time in seconds to sleep between draining', default=None)
+    parser.add_argument('-L', '--logfile', default=None,
+            help='after initial check, sends all output '
+                ' (both stdout and stderr) of draintasker and all its'
+                ' subprocesses to specified file.'
+                ' if the file exists, output will be appended to it')
+    parser.add_argument('--prefix', default=os.environ.get('DTMON_PREFIX', ''),
+            help='string to prepend to each sub-command '
+                '(intended for test/development aid)')
+    parser.add_argument('-1', '--once', action='store_true', default=False,
+            help='run each draining steps just once and exit. '
+                'this option replaces running s3-drain-jobs.sh manually')
+    args = parser.parse_args()
 
     configs = [os.path.abspath(a) for a in args]
     if os.path.isdir(configs[0]):
         opt.error('%s is a directory' % args[0])
 
-    dt = UpLoader(configs, sleep=options.interval, prefix=options.prefix)
+    dt = UpLoader(configs, sleep=args.interval, prefix=args.prefix)
 
     signal.signal(signal.SIGUSR1, lambda sig, st: dt.wakeup())
 
-    if options.run_http_server:
+    if args.run_http_server:
         import admin
         try:
-            admin.Server(dt, options.port).start()
+            admin.Server(dt, args.port).start()
         except Exception as ex:
             if hasattr(ex, 'errno') and ex.errno == os.errno.EADDRINUSE:
                 print >>sys.stderr, (
@@ -518,18 +374,18 @@ if __name__ == "__main__":
                     "port %d is used by other process. you can either specify"
                     " different port with -p (--http-port) option, or disable"
                     " HTTP status monitoring feature with --no-http option" %
-                    options.port)
+                    args.port)
                 sys.exit(1)
             else:
                 raise
-    if options.logfile:
+    if args.logfile:
         os.close(1)
-        assert os.open(options.logfile, os.O_WRONLY|os.O_CREAT) == 1
+        assert os.open(args.logfile, os.O_WRONLY|os.O_CREAT) == 1
         os.lseek(1, 0, 2)
         os.close(2)
         assert os.dup(1) == 2
     try:
-        dt.run(options.once)
+        dt.run(args.once)
     except KeyboardInterrupt:
         pass
     finally:

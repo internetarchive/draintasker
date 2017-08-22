@@ -12,13 +12,15 @@ import subprocess
 from testutils import *
 
 class PackWarcsTest(unittest.TestCase):
-    
+
     def testStandardPack(self):
         """standard packing; no warc renaming, common WARC naming pattern,
         """
+        # much smaller size for testing (1 MiB)
+        TESTCONF['max_size'] = '1M'
         ws = TestSpace(TESTCONF)
 
-        ITEM_SIZE = TESTCONF['max_size']*(1024**3)
+        ITEM_SIZE = 1*1024*1024
         # note that current pack-warcs.sh always leaves the last WARC file
         # even when it fits in max_size=1GB. so here we make 10 WARCs of
         # 1/9 GB. as each WARC file is larger than 1/9 GB, pack-warcs.sh will
@@ -38,7 +40,7 @@ class PackWarcsTest(unittest.TestCase):
 
         assert len(warcs_packed) == 8
 
-        p = subprocess.Popen([bin('pack-warcs.sh'), ws.configpath, '1'])
+        p = subprocess.Popen([binpath('pack-warcs.sh'), ws.configpath, '1'])
         #(out, err) = p.communicate()
         rc = p.wait()
 
@@ -47,7 +49,7 @@ class PackWarcsTest(unittest.TestCase):
 
         assert not os.path.exists(os.path.join(ws.jobdir, 'PACK.open')),\
             "PACK.open was not removed"
-        
+
         # last two files will not be packed.
         for w in warcs_packed:
             assert not os.path.exists(w), "%s was not packed" % w
@@ -60,27 +62,28 @@ class PackWarcsTest(unittest.TestCase):
         # until we write separate test-scripts for them. not doing
         # programmatic check of their behavior. script output must be
         # examined.
-        p = subprocess.Popen([bin('make-manifests.sh'), ws.xferdir])
+        p = subprocess.Popen([binpath('make-manifests.sh'), ws.xferdir])
         rc = p.wait()
         self.assertEqual(0, rc)
 
-        p = subprocess.Popen([bin('s3-launch-transfers.sh'), ws.configpath, '1', 'test'])
+        p = subprocess.Popen([binpath('s3-launch-transfers.sh'), ws.configpath, '1', 'test'])
         rc = p.wait()
         self.assertEqual(0, rc)
 
     def testCustomNaming(self):
-        
+
         CONF = dict(TESTCONF)
+        CONF['max_size'] = '1M'
         CONF['WARC_naming'] = '{prefix}-part-{serial}'
         CONF['item_naming'] = '{prefix}-{serial}-{lastserial}'
 
         ws = TestSpace(CONF)
 
-        ITEM_SIZE = CONF['max_size']*(1024**3)
+        ITEM_SIZE = 1*1024*1024
         wnames = ('XTUX-part-%05d' % (n,) for n in xrange(10))
         warcs1 = ws.create_warcs(wnames, size=ITEM_SIZE/9+1)
         # WARC with unmatching name - should not be packed
-        warcs2 = ws.create_warcs(['XTUX-par--00000'])
+        warcs2 = ws.create_warcs(['XTUX-par--00000'], size=ITEM_SIZE/9+1)
 
         warcs_packed = []
         total_size = 0
@@ -90,7 +93,7 @@ class PackWarcsTest(unittest.TestCase):
             warcs_packed.append(w)
             total_size += size
 
-        p = subprocess.Popen([bin('pack-warcs.sh'), ws.configpath, '1'])
+        p = subprocess.Popen([binpath('pack-warcs.sh'), ws.configpath, '1'])
         rc = p.wait()
 
         self.assertEqual(0, rc, "pack-warcs.sh exit code, "
@@ -112,7 +115,7 @@ class PackWarcsTest(unittest.TestCase):
         itemdir = os.path.join(ws.xferdir, item_name)
 
         assert os.path.isdir(itemdir), "%s was not created" % itemdir
-        
+
         for w in warcs_packed:
             path = os.path.join(itemdir, os.path.basename(w))
             assert os.path.isfile(path), "%s does not exist" % path

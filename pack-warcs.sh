@@ -1,4 +1,4 @@
-#!/bin/bash 
+#!/bin/bash
 #
 # pack-warcs.sh job_dir xfer_dir max_size warc_naming [force] [mode]
 #
@@ -6,7 +6,7 @@
 # in job_dir, create warc_series_dir in xfer_dir, move series
 # into xfer_dir, and leave PACKED file.
 #
-# if FINISH_DRAIN file found, then pack last warcs even 
+# if FINISH_DRAIN file found, then pack last warcs even
 # if << max_size
 #
 #   job_dir      /{0,1,2,3}/crawling/{crawljob}/warcs
@@ -38,6 +38,8 @@
 
 PG=$0; test -h $PG && PG=$(readlink $PG)
 BIN=$(dirname $PG)
+# assuming direct deployment (non-virtualenv)
+: ${GETCONF:=$BIN/lib/drain/config.py}
 
 usage="config [force] [mode=single]"
 
@@ -59,7 +61,18 @@ function query_user {
     exit 1
   fi
 }
-
+case $(uname) in
+  Darwin)
+    function filesize {
+      stat -f %z $1
+    }
+    ;;
+  *)
+    function filesize {
+      stat -c %s $1
+    }
+    ;;
+esac
 # parse_warc_name WARC-NAME VAR_PREFIX
 # decompose WARC-NAME according to WARC_NAME_PATTERN and stores
 # each component into variable ${VAR_PREFIX}COMPONENT
@@ -111,34 +124,33 @@ fi
 echo $(basename $0) $(date)
 
 CONFIG=$1
-$BIN/config.py $CONFIG || {
+$GETCONF $CONFIG || {
   echo "ERROR: invalid config: $CONFIG"
   exit 1
 }
 force=${2:-0}
 mode=${3:-single}
 # get config parameters
-job_dir=$($BIN/config.py $CONFIG job_dir)
-xfer_home=$($BIN/config.py $CONFIG xfer_dir)
-max_GB=$($BIN/config.py $CONFIG max_size)
-compactify=$($BIN/config.py $CONFIG compact_names)
-WARC_NAME_PATTERN="$($BIN/config.py $CONFIG warc_name_pattern)"
-item_naming="$($BIN/config.py $CONFIG item_name_template)"
-ITEM_NAME_TEMPLATE="$($BIN/config.py $CONFIG item_name_template_sh)"
-verify_gzip=$($BIN/config.py $CONFIG verify_gzip)
+job_dir=$($GETCONF $CONFIG job_dir)
+xfer_home=$($GETCONF $CONFIG xfer_dir)
+max_size=$($GETCONF $CONFIG max_size)
+compactify=$($GETCONF $CONFIG compact_names)
+WARC_NAME_PATTERN="$($GETCONF $CONFIG warc_name_pattern)"
+item_naming="$($GETCONF $CONFIG item_name_template)"
+ITEM_NAME_TEMPLATE="$($GETCONF $CONFIG item_name_template_sh)"
+verify_gzip=$($GETCONF $CONFIG verify_gzip)
 
 if [ ! -d $job_dir ]; then
   echo "ERROR: job_dir not found: $job_dir"
   exit 1
 fi
 
-max_size=$(( max_GB * 1024 * 1024 * 1024 ))
 warc_series=''
 
 # check for warcvalidator on path ($WARC_TOOLS/app/warcvalidator)
-# 
+#
 # WARCVALIDATOR DISABLED
-# 
+#
 # warcvalidator="$WARC_TOOLS/app/warcvalidator"
 # if [ ! -e "$warcvalidator" ]
 # then
@@ -146,7 +158,8 @@ warc_series=''
 #   exit 2
 # fi
 
-SUFFIX_RE='\.w?arc\(\.gz\)?'
+# MacOS X find is strictly posix BRE, which lacks "?""
+SUFFIX_RE='\.w\{0,1\}arc\(\.gz\)\{0,1\}'
 WARC_NAME_RE="$(sed -e 's/{[^}]*}/\\(.*\\)/g' <<<"$WARC_NAME_PATTERN")"
 WARC_NAME_RE_FIND=".*/${WARC_NAME_RE}${SUFFIX_RE}"'$'
 
@@ -181,14 +194,14 @@ echo $$ > $open || {
 
 for w in $(find $job_dir -maxdepth 1 -regex "${WARC_NAME_RE_FIND}"); do
     ((total_num_warcs++))
-    ((total_size_warcs += $(stat -c %s $w)))
+    ((total_size_warcs += $(filesize $w)))
 done
 
 echo "  job_dir          = $job_dir"
 echo "  xfer_home        = $xfer_home"
 echo "  warc_naming      = $WARC_NAME_PATTERN"
 echo "  item_naming      = $item_naming"
-echo "  max_series_size  = $max_size (${max_GB}GB)"
+echo "  max_series_size  = $max_size"
 echo "  total_num_warcs  = $total_num_warcs"
 echo "  total_size_warcs = $total_size_warcs"
 echo "  FINISH_DRAIN     = $FINISH_DRAIN"
@@ -198,7 +211,7 @@ echo "  compactify       = $compactify"
 
 if [ "$force" -ne 1 ]; then query_user; fi
 
-# abort packing when less than max_GB warcs and no FINISH_DRAIN
+# abort packing when less than max_size warcs and no FINISH_DRAIN
 if [ ! -f $FINISH_DRAIN ]; then
   if ((total_size_warcs < max_size)); then
     echo $(basename $0) "too few WARCs and FINISH_DRAIN file not found, exiting normally"
@@ -217,7 +230,7 @@ mfiles=()  # manifest files array
 # loop over warcs in job dir
 cd $job_dir
 for w in $(find $job_dir -maxdepth 1 -regex "${WARC_NAME_RE_FIND}" | sort)
-do 
+do
   if [[ $w =~ \.gz$ ]]; then
     # check gzip container
     if [ "$mode" != test -a "$verify_gzip" != 0 ]; then
@@ -244,7 +257,7 @@ do
   # ((valid_count++))
 
   # increment msize
-  fsize=$(stat -c %s $w)
+  fsize=$(filesize $w)
   ((msize+=fsize))
 
   ((warc_count++))
@@ -296,7 +309,7 @@ do
 
     pack_info="$warc_series ${#mfiles[@]} $msize"
 
-    echo "files considered for packing:" 
+    echo "files considered for packing:"
     i=0
     for file in ${mfiles[@]}; do
 	printf "%5s %s\n" [$((++i))] $file
@@ -343,7 +356,7 @@ do
     ((pack_count++))
     unset source
     unset target
-  done       
+  done
 
   # leave PACKED file
   echo "PACKED: $pack_info"

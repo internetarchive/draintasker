@@ -2,7 +2,6 @@
 #
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../lib')))
 from tempfile import mkdtemp
 import shutil
 import random
@@ -12,10 +11,10 @@ from hashlib import md5
 
 import yaml
 
-__all__ = ['bin', 'TESTCONF', 'TestSpace']
+__all__ = ['binpath', 'TESTCONF', 'TestSpace']
 
 BINDIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-def bin(f):
+def binpath(f):
     return os.path.join(BINDIR, f)
 
 TESTCONF = dict(
@@ -58,6 +57,7 @@ description: Special crawl on Argentina government sites
 robots: obey
 http-header-user-agent: Mozilla/5.0 (compatible; archive.org_bot +http://www.archive.org/details/archive.org_bot)
 """
+import pytest
 
 class TestSpace(object):
     def __init__(self, conf, tmpdir='/tmp'):
@@ -89,7 +89,7 @@ class TestSpace(object):
         for name in names:
             name += '.warc.gz'
             path = os.path.join(self.jobdir, name)
-            sys.stdout.write('%s ' % name)
+            sys.stderr.write('%s ' % name)
             if reuse:
                 # copy the first one. actually, link would be sufficient
                 # for test.
@@ -99,7 +99,7 @@ class TestSpace(object):
                 z.write(TEST_WARCINFO)
                 z.close()
                 while os.path.getsize(path) < size:
-                    sys.stdout.write('\r%s %s' %
+                    sys.stderr.write('\r%s %s' %
                                      (name, os.path.getsize(path)))
                     z = gzip.open(path, 'a')
                     # pack-warcs doesn't care if WARC file content is in fact
@@ -112,7 +112,7 @@ class TestSpace(object):
                     z.close()
                 reuse = path
             warcs.append(path)
-            sys.stdout.write('\r%s %s\n' % (name, os.path.getsize(path)))
+            sys.stderr.write('\r%s %s\n' % (name, os.path.getsize(path)))
         return warcs
 
     def random_bytes(self, length):
@@ -147,7 +147,7 @@ class TestSpace(object):
                 hash.update(bytes)
             sys.stdout.write('\n')
             warcs.append([name, hash.hexdigest()])
-        
+
         packed = os.path.join(itemdir, 'PACKED')
         with open(packed, 'w') as w:
             w.write('%s %d %d\n' % (iid, len(names), totalsize))

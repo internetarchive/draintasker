@@ -27,3 +27,7 @@ def localtime():
 def iso_datetime():
     return time.strftime("%Y-%m-%dT%H:%M:%S%Z",time.localtime())
 
+class Storage(object):
+    def __init__(self, **kwds):
+        for k, v in kwds.iteritems():
+            setattr(self, k, v)

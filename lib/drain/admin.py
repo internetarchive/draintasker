@@ -9,11 +9,7 @@ from tempfile import NamedTemporaryFile
 from datetime import datetime
 import time
 import threading
-
-class Storage(object):
-    def __init__(self, **kwds):
-        for k, v in kwds.iteritems():
-            setattr(self, k, v)
+from .utils import Storage
 
 class WebUI(web.RequestHandler):
     def initialize(self, manager):
@@ -38,7 +34,7 @@ class WebUI(web.RequestHandler):
             self.write(dict(ok=1, pid=pinfo.p.pid, out=pinfo.o.name))
         except Exception as ex:
             self.write(dict(ok=0, error=str(ex)))
-    
+
     def get_starttransfers(self):
         try:
             pj = int(self.get_argument('pj'))
@@ -87,7 +83,7 @@ class WebUI(web.RequestHandler):
         pj = self.manager.projects[pjid]
         pj.finishdrain((sw=='1'))
         self.write(dict(pj=pj.id, sw=sw, ok=1))
-            
+
 class Files(web.RequestHandler):
     def initialize(self, manager):
         self.manager = manager

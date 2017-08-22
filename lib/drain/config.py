@@ -7,12 +7,11 @@ Usage: config.py file [param]
 __author__ = "siznax 2010"
 
 import sys, os, pprint, re
-# svn co http://svn.pyyaml.org/pyyaml/trunk/ lib/pyamml
-#sys.path[0:0] = (os.path.join(sys.path[0], 'lib'),)
-if __name__ == '__main__':
-    libpath = os.path.join(os.path.dirname(__file__), 'lib')
-    if libpath not in sys.path: sys.path.append(libpath)
-import yaml
+try:
+    import yaml
+except ImportError as ex:
+    # for running config.py as main script
+    pass
 
 MAX_ITEM_SIZE_GB = 10
 
@@ -41,7 +40,7 @@ class DrainConfig(object):
         v = self.get_param(name)
         if not vf(v):
             raise ValueError, '%s %s: %s' % (name, msg, v)
- 
+
     def check_integer(self, name):
         self.__check(name, is_integer, 'must be an integer')
 
@@ -51,7 +50,7 @@ class DrainConfig(object):
         self.__check('xfer_dir', os.path.isdir, 'must be a directory')
         self.check_integer('sleep_time')
         # max_size < MAX_ITEM_SIZE_GB
-        if self.cfg['max_size'] > MAX_ITEM_SIZE_GB:
+        if self['max_size'] > MAX_ITEM_SIZE_GB*1024*1024*1024:
             raise ValueError, "max_size=%d exceeds MAX_ITEM_SIZE_GB=%d" % (
                 self.cfg['max_size'], MAX_ITEM_SIZE_GB)
         # WARC_naming = 1, 2 or a string
@@ -226,7 +225,25 @@ class DrainConfig(object):
                 meta.update(v)
             # TODO: we should warn/abort if v is not a dict
             return meta
-                
+        if param == 'max_size':
+            value = self.cfg.get(param)
+            if isinstance(value, int):
+                # if no suffix, defaults to 'G'
+                return value * 1024 * 1024 * 1024
+            m = re.match(r'([0-9.]+)([a-zA-Z])$', format(value))
+            if not m:
+                raise ValeError(
+                    'illegal value for max_size: {!r}'.format(value))
+            value, unit = m.groups()
+            try:
+                factor = {
+                    'k': 1000, 'K': 1024, 'm': 1000**2, 'M': 1024*1024,
+                    'g': 1000**3, 'G': 1024**3, 't': 1000**4, 'T': 1024**4
+                    }[unit]
+                return int(float(value) * factor)
+            except KeyError as ex:
+                raise ValueError(
+                    'Undefined suffix for max_size: {!r}'.format(value))
         return self.cfg.get(param)
 
     def iteritems(self):
@@ -264,28 +281,33 @@ class DrainConfig(object):
                 print >>out, int(v)
             else:
                 print >>out, v if v is not None else ''
-        
+
 def format_header(k, v):
     if isinstance(v, list):
         for i, v1 in enumerate(v):
             yield 'x-archive-meta%02d-%s:%s' % (i+1, k, v1)
     else:
         yield 'x-archive-meta-%s:%s' % (k, v if v is not None else '')
-            
+
 if __name__ == "__main__":
-    from optparse import OptionParser
-    opt = OptionParser()
-    opt.add_option('-f', dest='format', default=None)
-    opt.add_option('-m', action='store_const', dest='format', const='header',
-                   help='equivalent of -f header')
-    options, args = opt.parse_args()
-    if len(args) < 1:
-        print os.path.basename(__file__),  __doc__, __author__
-        sys.exit(1)
+    libpath = os.path.join(os.path.dirname(__file__), '../../lib')
+    if libpath not in sys.path:
+        sys.path.append(libpath)
+    import yaml
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-f', '--format', default=None)
+    parser.add_argument('-m', action='store_const', dest='format',
+            const='header', help='synonym of -f header')
+    parser.add_argument('config')
+    parser.add_argument('param', nargs='?')
+
+    args = parser.parse_args()
+
+    config = DrainConfig(args.config)
+
+    if args.param is None:
+        if config.validate():
+            config.pprint()
     else:
-        config = DrainConfig(args[0])
-        if len(args) == 1:
-            if config.validate():
-                config.pprint()
-        elif len(args) == 2:
-            config.pprint(param=args[1], format=options.format)
+        config.pprint(param=args.param, format=args.format)

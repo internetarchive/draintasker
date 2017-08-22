@@ -1,1 +1,3 @@
 *.pyc
+/lib/*.egg-info
+/.cache/

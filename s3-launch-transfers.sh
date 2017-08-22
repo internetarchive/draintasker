@@ -3,7 +3,7 @@
 # s3-launch-transfers.sh config [force] [mode]
 #
 # foreach warc_series in xfer_job_dir, submit an S3 HTTP request
-# to upload files to remote storage - unless one of the 
+# to upload files to remote storage - unless one of the
 # following files exists: LAUNCH, LAUNCH.open, ERROR, TASK
 #
 #  config   config params in this file
@@ -39,7 +39,8 @@
 
 PG=$0; test -h $PG && PG=$(readlink $PG)
 BIN=$(dirname $PG)
-: ${GETCONF:=$BIN/config.py}
+# assuming direct deployment (non-virtualenv)
+: ${GETCONF:=$BIN/lib/drain/config.py}
 
 usage="config [force] [mode=single]"
 
@@ -94,17 +95,17 @@ function set_date_range {
 
     scandate=${t:0:14}
     metadate=${t:0:4}
-    
+
     # get dates from last file in series
     last_file_date=$(parse_warc_name $(basename "$2"); echo $timestamp)
 
-    # warc end date (from last file mtime). should (closely) 
+    # warc end date (from last file mtime). should (closely)
     # correspond to time of last record in series
     local t=$(date +%Y%m%d%H%M%S -d @"$(stat -c %Y "$2")")
     last_date=$t
     end_date_ISO="$(set_tISO "$t")"
     end_date_HR="$(set_tHR "$t")"
-    
+
     date_range="${start_date_ISO} to ${end_date_ISO}"
 }
 
@@ -115,7 +116,7 @@ function warc_software {
     fi
     $cat $1 2>/dev/null | awk '/^software:/{ print $2 } NR>1&&/^WARC\//{ exit }'
 }
-	
+
 function echo_curl_output {
     echo "http://${s3}/${bucket}/${filename}" | tee -a $TASK
     echo "  response_code $1" | tee -a $TASK
@@ -157,15 +158,15 @@ function verify_etag {
     if [ -f $tmpfile ]
     then
         # this is a nice solution, thanks to Kenji
-        # extract everything between quotes from Etag line, and 
-        # immediately quit processing. it's far more efficient, 
-        # and avoids the problem i had using grep + awk + tr 
-        # which resulted in a ^M in the output, which failed 
+        # extract everything between quotes from Etag line, and
+        # immediately quit processing. it's far more efficient,
+        # and avoids the problem i had using grep + awk + tr
+        # which resulted in a ^M in the output, which failed
         # the equality test below when it shouldn't have
         etag=`sed -ne '/ETag/{s/.*"\(.*\)".*/\1/p;q}' $tmpfile`
         if [ "$etag" != "$checksum" ]
         then
-            # eventually want to retry, but let's see how often 
+            # eventually want to retry, but let's see how often
             # this happens
             echo "ERROR: bad ETag!"                   | tee -a $ERROR
             echo "  Content-MD5 request: '$checksum'" | tee -a $ERROR
@@ -567,7 +568,7 @@ do
   #     -z "$description" -o -z "$scancenter" -o -z "$operator" ]; then
   #    echo "ERROR some null metadata." | tee -a $OPEN
   #    echo "Aborting." | tee -a $OPEN
-  #    exit 1          
+  #    exit 1
   #fi
 
   echo "[item metadata]"

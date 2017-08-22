@@ -1,0 +1,27 @@
+crawljob: wide
+job_dir: /tmp
+xfer_dir: /tmp
+sleep_time: 300
+max_size: 10
+WARC_naming: 2
+block_delay: 120
+max_block_count: 120
+retry_delay: 2400
+description: CRAWLHOST:CRAWLJOB from START_DATE to END_DATE.
+operator: crawl@archive.org
+collections: webwidecrawl/widecrawl/wide00004
+title_prefix: Webwide Crawldata
+creator: Internet Archive
+sponsor: Internet Archive
+contributor: Internet Archive
+scanningcenter: sanfrancisco
+derive: 1
+compact_names: 0
+metadata:
+  sponsor: Other Sponsor
+  arbitrary: Metadata
+  multivalue:
+    - value1
+    - value2
+    - value3
+
