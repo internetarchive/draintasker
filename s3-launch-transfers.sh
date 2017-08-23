@@ -324,14 +324,21 @@ fi
 
 echo $(basename $0) $(date)
 
-S3CFG=$HOME/.ias3cfg
-
 if [ ! -f $CONFIG ]; then
     echo "ERROR: config not found: $CONFIG"
     exit 1
 fi
+
+if [ -z "$S3CFG" ]; then
+  for d in "$(dirname $CONFIG)" $HOME; do
+    S3CFG=$d/.ias3cfg
+    if [ -f $S3CFG ]; then
+      break
+    fi
+  done
+fi
 if [ ! -f $S3CFG ]; then
-    echo "ERROR: s3cfg not found: $S3CFG"
+    echo "ERROR: IAS3 credentials file not found: $S3CFG"
     exit 1
 fi
 # validate configuration
