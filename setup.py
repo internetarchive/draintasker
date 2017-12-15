@@ -6,8 +6,7 @@ setup(
     description="Continuous Uploader for Crawling Projects",
     author="Internet Archive",
     author_email="kenji@archive.org",
-    package_dir={'':'lib'},
-    packages=['drain'], #find_packages(),
+    packages=['draintasker'], #find_packages(),
     package_data={
         'drain': ["templates/*.html", "static/*.css", "static/*.js"]
         },
@@ -17,6 +16,7 @@ setup(
         "six",
         "tornado",
         "PyYAML",
+        "python-dateutil"
         ],
     tests_require=[
         "pytest",

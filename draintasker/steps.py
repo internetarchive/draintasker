@@ -9,7 +9,7 @@ from .drain import Logging, Series
 from dateutil.parser import parse as dateutil_parse
 
 class DrainStep(Logging):
-    self.logstack = None
+    logstack = None
     def _pushlog(self, log):
         if not isinstance(self.logstack, list):
             self.logstach = []
@@ -21,18 +21,20 @@ class DrainStep(Logging):
     def query_user(self):
         print "Continue [Y/n]> "
         text = sys.stdin.readline()
-        return if text == 'Y'
+        return text.lower() == 'y'
 
-    def list_items(self, d):
+    def list_buckets(self, d):
         """return item directory names in ``d'' (has no path part)."""
         def is_itemdir(fn):
             return os.path.isdir(os.path.join(d, fn))
         return [fn for fn in os.listdir(d) if is_itemdir(fn)]
 
+    list_items = list_buckets
+
     def list_serieses(self, d):
         """Return items in job directory ``d`` as a list of :class:`Series`
         objects."""
-        return (Series(d, fn) for fn in self.list_items())
+        return (Series(d, fn) for fn in self.list_buckets())
 
     def _filename_regexp(self):
         """Regular expression for collecting and extracting

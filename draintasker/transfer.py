@@ -120,11 +120,11 @@ class TransferStep(DrainStep):
 
     def schedule_retry(self, retry_count):
         # TODO: keep_trying = False
-        retry_epoch = int(time.time())
+        retry_time = int(time.time()) + retry_delay
         self.log.info("RETRY: attempt (%d) scheduled"
-                "after %d seconds: %s", retry_count, retry_delay, retry_epoch)
+                "after %d seconds: %s", retry_count, retry_delay, retry_time)
         if not d.RETRY:
-            d.RETRY.write(format(retry_epoch))
+            d.RETRY.write(format(retry_time))
 
     def time_to_retry(self, d):
         """
@@ -135,26 +135,26 @@ class TransferStep(DrainStep):
             # datetime
             retry_time = d.RETRY.retry_time
             retry_time_ts = timegm(retry_time.timetuple())
-            log.info("RETRY file exists: %s [%s]", d.RETRY, retry_time)
+            self.log.info("RETRY file exists: %s [%s]", d.RETRY, retry_time)
             now = datetime.now()
             if now < retry_time:
-                log.info("  RETRY delay (now=%s < retry_time=%s)",
+                self.log.info("  RETRY delay (now=%s < retry_time=%s)",
                         now, retry_time)
                 return False
 
-            log.info("  RETRY OK (now=%s >= retry_time=%s)",
+            self.log.info("  RETRY OK (now=%s >= retry_time=%s)",
                     now, retry_time)
-            log.info("    moving aside RETRY file")
+            self.log.info("    moving aside RETRY file")
             try:
                 # may raise OSError for permission denied, etc.
                 d.RETRY.remove(save_suffix=format(retry_time_ts))
             except OSError as ex:
-                log.error("    failed to rename %s", retry_file)
+                self.log.error("    failed to rename %s", retry_file)
                 # it is very likely we cannot work on this item.
                 # skip.
                 return False
 
-            log.info("moving aside blocking files")
+            self.log.info("moving aside blocking files")
             for blocker in (d.LAUNCH, d.ERROR, d.TASK):
                 if blocker:
                     blocker.remove(save_suffix=format(retry_time_ts))
@@ -222,14 +222,17 @@ class TransferStep(DrainStep):
 
     def execute(self):
         max_launch = 1 if mode == 'single' or mode == 'test' or sys.maxint
+        launch_count = 0
         for d in self.list_serieses():
+            # LAUNCH file is closed to transfer step.
+            d.LAUNCH = StateFile(d, 'LAUNCH')
             if self.process_item(d):
                 launch_count += 1
                 # check mode
                 if launch_count >= max_launch:
                     self.info("mode = %s, exiting normally", mode)
                     break
-        self.info("%s buckets filled")
+        self.info("%s buckets filled", launch_count)
         self.info("%s done. %s", self.name, datetime.now())
 
     def process_item(self, d):
@@ -414,10 +417,15 @@ class TransferStep(DrainStep):
 
         return True
 
-
-if __name__ == '__main__':
-    import argparse
+def run(configpath, force=0, mode=None):
     from .config import DrainConfig
+
+    config = DrainConfig(configpath)
+    step = TransferStep(config, interactive=not force, mode=mode)
+    return step.execute()
+
+def main():
+    import argparse
 
     parser = argparse.ArgumentParser(TransferStep.DESCRIPTION)
     parser.add_argument('config', help="Draintasker project configuration filename")
@@ -426,6 +434,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # allow for customizing how to configure S3 credentials
-    config = DrainConfig(args.config)
-    step = TransferStep(config, interactive=not args.force, mode=args.mode)
-    step.execute()
+    return run(args.config, args.force, args.mode)

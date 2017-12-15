@@ -1,16 +1,17 @@
+from __future__ import unicode_literals, print_function
 import sys
 import os
 
 class Logging(object):
     # TODO: move these methods to super-class
     def error(self, msg, *args):
-        print >>sys.stderr, "ERROR:", msg % args
+        print("ERROR:", msg % args, file=sys.stderr)
     def warn(self, msg, *args):
-        print >>sys.stderr, msg % args
+        print(msg % args, file=sys.stderr)
     def info(self, msg, *args):
-        print >>sys.stderr, msg % args
+        print(msg % args, file=sys.stderr)
     def debug(self, msg, *args):
-        print >>sys.stderr, msg % args
+        print(msg % args, file=sys.stderr)
 
 class IllegalStateError(Exception):
     """:class:`StateFile` is in illegal state for the action.
@@ -18,32 +19,36 @@ class IllegalStateError(Exception):
 
 class StateFileWriter(object):
     def __init__(self, statefile, fileobj):
-        """Handy write for :class:`StateFile`.
+        """Handy writer for :class:`StateFile`.
         """
         self.statefile = statefile
         self.fileobj = fileobj
 
     def __enter__(self):
         return self
-    def __exit__(self, *excinfo):
+    def __exit__(self, extype, ex, tb):
         self.fileobj.close()
-        self.statefile.close()
+        # when exiting by an exception, statefile will be left in "open" state.
+        # this will prevent further processing depending on this state from
+        # proceeding. 
+        if ex is None:
+            self.statefile.close()
 
     def error(self, msg, *args):
-        print >>self.fileobj, "ERROR:", msg % args
+        print("ERROR:", msg % args, file=self.fileobj)
     def warn(self, msg, *args):
-        print >>self.fileobj, msg % args
+        print("WARNING:", msg % args, file=self.fileobj)
     def info(self, msg, *args):
-        print >>self.fileobj, msg % args
+        print(msg % args, file=self.fileobj)
 
-    def write(self, msg, *args):
-        self.fileobj.write(msg % args)
+    def write(self, text):
+        self.fileobj.write(text)
 
 class StateFile(object):
     def __init__(self, series, filename):
         """Draintasker uses StateFile for keeping track of
         process states, leaving logs, etc. StateFile is often
-        created with ``.open`` suffix and _locks_ buckets, i.e.
+        created with ``.open`` suffix in order to _lock_ buckets, i.e.
         to prevent other processes from working on the same item
         concurrently.
 
@@ -58,13 +63,15 @@ class StateFile(object):
         self.filename = filename
 
     def open(self, mode="a"):
-        """Move this StateFile to `open` state and returns file object
+        """Move this StateFile to `open` state and returns file-like object
         for writing to it.
 
         :param mode: open mode. ``"a"`` by default for appending.
         """
-        if self:
-            raise IllegalStateError("Cannot open: {} exists.".format(self.path))
+        if self.is_open():
+            raise IllegalStateError("Cannot open: {} exists.".format(self._openpath))
+        if self.exists():
+            os.rename(self.path, self._openpath)
         return StateFileWriter(self, open(self._openpath, mode))
 
     def close(self):
@@ -121,6 +128,8 @@ class StateFile(object):
         """Returns ``True`` if this StateFile exists and not in
         `open` state.
         """
+        return os.path.exists(self.path)
+    def exists(self):
         return os.path.exists(self.path)
     def is_open(self):
         return os.path.exists(self.path + ".open")
@@ -180,6 +189,12 @@ class SeriesFlie(object):
 
 class Series(object):
     def __init__(self, xfer, name):
+        """Series represents a staging directory for uploading files to
+        an petabox item.
+
+        :param xfer: parent directory of staging directories
+        :param name: item identifier
+        """
         self.xfer = xfer
         self.name = name
         self.path = os.path.join(self.xfer, self.name)
@@ -187,7 +202,7 @@ class Series(object):
         self.RETRY = RetryState(self, 'RETRY')
         self.PACKED = PackedState(self, 'PACKED')
         self.MANIFEST = PackManifest(self, 'MANIFEST')
-        self.LAUNCH = StateFile(self, 'LAUNCH')
+        #self.LAUNCH = StateFile(self, 'LAUNCH')
         self.TASK = StateFile(self, 'TASK')
         self.SUCCESS = StateFile(self, 'SUCCESS')
         self.ERROR = StateFile(self, 'ERROR')
@@ -200,12 +215,18 @@ class Series(object):
         except OSError:
             self.mtime = 0
 
+    def _path(self, fn):
+        return os.path.join(self.xfer, self.name, fn)
+
+    def exists(self):
+        return os.path.isdir(self.path)
+    
     def has_file(self, file):
-        return os.path.isfile(os.path.join(self.xfer, self.name, file))
+        return os.path.isfile(self._path(file))
+
     def read_file(self, file):
-        path = os.path.join(self.xfer, self.name, file)
         try:
-            f = open(path)
+            f = open(self._path(file))
             c = f.read().rstrip()
             f.close()
             return c
@@ -305,9 +326,7 @@ class Series(object):
                 except:
                     pass
         try:
-            f = open(self.RETRY, 'w')
-            f.write("0\n")
-            f.close()
+            self.RETRY.write("0\n")
             return dict(ok=1)
         except Exception as ex:
             return dict(ok=0, error=str(ex))

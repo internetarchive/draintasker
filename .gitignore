@@ -1,3 +1,4 @@
 *.pyc
-/lib/*.egg-info
+*.egg-info/
 /.cache/
+__pycache__/

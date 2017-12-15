@@ -1,5 +1,6 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
+from __future__ import unicode_literals, print_function
 from tornado import ioloop, web, template
 import os, re, sys
 import yaml
@@ -109,23 +110,26 @@ class Server(threading.Thread):
         threading.Thread.__init__(self)
         self.daemon = True
         self.manager = manager
-        tmpldir = os.path.join(os.path.dirname(__file__), 't')
+        tmpldir = os.path.join(os.path.dirname(__file__), 'templates')
         appvars = dict(manager=self.manager)
         self.app = web.Application([ (r'/files/(.*)', Files, appvars),
                                      (r'/(.*)', WebUI, appvars)
                                      ],
                                    template_path=tmpldir)
-        print >>sys.stderr, "Server listening on port %d" % port
+        print("Server listening on port %d" % (port,), file=sys.stderr)
         self.app.listen(port)
+
     def run(self):
         ioloop.IOLoop.instance().start()
 
 if __name__ == "__main__":
-    from optparse import OptionParser
-    opt = OptionParser('%prog [OPTIONS] DTMON.CFG...')
-    opt.add_option('-p', '--port', action='store', dest='port', type='int',
-                   default=8081,
-                   help='port to listen on for HTTP connection')
-    options, args = opt.parse_args()
-    configs = [ dict(dtconf=os.path.abspath(c)) for c in args ]
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-p', '--port', type=int, default=8231,
+                        help='port to listen on for HTTP connection')
+    parser.add_argument('config', nargs='+')
+
+    args = parser.parse_args()
+    configs = [dict(dtconf=os.path.abspath(c)) for c in args.config]
+
     Server(args, options.port, None).start()

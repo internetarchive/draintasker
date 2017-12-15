@@ -4,9 +4,13 @@ Usage: config.py file [param]
     file   a YAML config file
     param  optional param to get from file
 """
+from __future__ import unicode_literals, print_function
 __author__ = "siznax 2010"
 
-import sys, os, pprint, re
+import sys
+import os
+import pprint
+import re
 try:
     import yaml
 except ImportError as ex:
@@ -31,15 +35,15 @@ class DrainConfig(object):
             with open(fname) as f:
                 return yaml.load(f.read().decode('utf-8'))
         except OSError:
-            print >>sys.stderr, "Failed to open %s" % fname
-        except yaml.YAMLError, exc:
-            print >>sys.stderr, "Error parsing config:", exc
+            print("Failed to open %s" % (fname,), file=sys.stderr)
+        except yaml.YAMLError as exc:
+            print("Error parsing config: %s", (exc,), file=sys.stderr)
             sys.exit(1)
 
     def __check(self, name, vf, msg):
         v = self.get_param(name)
         if not vf(v):
-            raise ValueError, '%s %s: %s' % (name, msg, v)
+            raise ValueError('%s %s: %s' % (name, msg, v))
 
     def check_integer(self, name):
         self.__check(name, is_integer, 'must be an integer')
@@ -51,8 +55,8 @@ class DrainConfig(object):
         self.check_integer('sleep_time')
         # max_size < MAX_ITEM_SIZE_GB
         if self['max_size'] > MAX_ITEM_SIZE_GB*1024*1024*1024:
-            raise ValueError, "max_size=%d exceeds MAX_ITEM_SIZE_GB=%d" % (
-                self.cfg['max_size'], MAX_ITEM_SIZE_GB)
+            raise ValueError("max_size=%d exceeds MAX_ITEM_SIZE_GB=%d" % (
+                self.cfg['max_size'], MAX_ITEM_SIZE_GB))
         # WARC_naming = 1, 2 or a string
         self.__check('WARC_naming',
                      lambda x: x in (1, 2) or isinstance(x, basestring),
@@ -64,11 +68,11 @@ class DrainConfig(object):
 
         # description descriptive with keywords
         if re.search("{describe_effort}", self.cfg['description']):
-            raise ValueError, "desription must not contain "\
-                + "'{describe_effort}'"
+            raise ValueError("desription must not contain "\
+                + "'{describe_effort}'")
         for key in ('CRAWLHOST','CRAWLJOB','START_DATE','END_DATE'):
             if not re.search(key, self.cfg['description']):
-                raise ValueError, "description must contain placeholder " + key
+                raise ValueError("description must contain placeholder " + key)
         # operator not tbd
         self.__check('operator', lambda x: x != 'tbd@archive.org',
                      'must be proper operator identifier')
@@ -85,7 +89,7 @@ class DrainConfig(object):
             # these metadata has been moved to "metadata" submap, which
             # automatically incorporates values from old parameters.
             if not metadata.get(key, None):
-                raise ValueError, '%s is missing' % key
+                raise ValueError('%s is missing' % key)
 
         # derive is int
         self.check_integer('derive')
@@ -263,25 +267,26 @@ class DrainConfig(object):
                         if re.search(r'\s', key): continue
                         if value is None or value == '': continue
                         for s in format_header(key, value):
-                            print >>out, s
+                            print(s, file=out)
                 else:
                     for key, value in v.iteritems():
                         # space in key screws up, so drop it
                         if re.search(r'\s', key): continue
                         if value is None:
-                            print >>out, "%s\t"
+                            print("%s\t" % (key,), file=out)
                         elif isinstance(value, list):
-                            print >>out, "%s\t%s" % (key, ';'.join(value))
+                            print("%s\t%s" % (key, ';'.join(value)), file=out)
                         else:
-                            print >>out, "%s\t%s" % (key, value)
+                            print("%s\t%s" % (key, value), file=out)
             elif isinstance(v, list):
                 for value in v:
-                    print >>out, value
+                    print(value, file=out)
             elif isinstance(v, bool):
-                print >>out, int(v)
+                print(int(v), file=out)
             else:
-                print >>out, v if v is not None else ''
+                print(v if v is not None else '', file=out)
 
+# TODO: move to transfer
 def format_header(k, v):
     if isinstance(v, list):
         for i, v1 in enumerate(v):
