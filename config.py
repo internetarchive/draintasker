@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 """returns a config dict string from YAML config file
 Usage: config.py file [param]
     file   a YAML config file
@@ -226,6 +226,38 @@ class DrainConfig(object):
                 meta.update(v)
             # TODO: we should warn/abort if v is not a dict
             return meta
+        if param == 's3cfg':
+            s3cfg = os.environ.get('S3CFG')
+            if s3cfg:
+                try:
+                    open(s3cfg, 'r')
+                    return s3cfg
+                except Exception as ex:
+                    print >>sys.stderr, "Error: cannot read %s (by S3CFG)" % (
+                        s3cfg)
+                    return None
+
+            def candidates():
+                yield os.path.dirname(self.fname)
+                yield os.environ["HOME"]
+                # try homedir of effective user. if user runs draintasker
+                # with sudo, HOME often has a value for the real user.
+                try:
+                    # pwd module is not available on all platforms
+                    import pwd
+                    pw = pwd.getpwuid(os.geteuid())
+                    if pw:
+                        yield pw.pw_dir
+                except ImportError:
+                    pass
+            for path in candidates():
+                try:
+                    s3cfg = os.path.join(path, '.ias3cfg')
+                    open(s3cfg, 'r')
+                    return s3cfg
+                except Exception:
+                    pass
+            return None
                 
         return self.cfg.get(param)
 

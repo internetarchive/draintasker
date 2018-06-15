@@ -331,24 +331,16 @@ if [ ! -f $CONFIG ]; then
     echo "ERROR: config not found: $CONFIG"
     exit 1
 fi
-
-if [ -z "$S3CFG" ]; then
-  for d in "$(dirname $CONFIG)" $HOME; do
-    S3CFG=$d/.ias3cfg
-    if [ -f $S3CFG ]; then
-      break
-    fi
-  done
-fi
-if [ ! -f $S3CFG ]; then
-    echo "ERROR: IAS3 credentials file not found: $S3CFG"
-    exit 1
-fi
 # validate configuration
 $GETCONF $CONFIG || {
     echo "ERROR: invalid config: $CONFIG"
     exit 1
 }
+s3cfg=$($GETCONF $CONFIG s3cfg)
+if [ -z "$s3cfg" ]; then
+  echo "ERROR: IAS3 credentials file not found or unreadable"
+  exit  1
+fi
 xfer_job_dir=$($GETCONF $CONFIG xfer_dir)
 
 # crawljob is used in description
@@ -419,7 +411,7 @@ do
   echo "crawldata: $crawldata"   | tee -a $OPEN
   echo "mode: $mode"             | tee -a $OPEN
   echo "  CONFIG:    $CONFIG"    | tee -a $OPEN
-  echo "  S3CFG:     $S3CFG"     | tee -a $OPEN
+  echo "  S3CFG:     $s3cfg"     | tee -a $OPEN
   echo "  MANIFEST:  $MANIFEST"  | tee -a $OPEN
   echo "  OPEN:      $OPEN"      | tee -a $OPEN
   echo "  TASK:      $TASK"      | tee -a $OPEN
@@ -489,8 +481,8 @@ do
   set_date_range "$first_file" "$last_file"
 
   # get keys
-  access_key=`grep access_key $S3CFG | awk '{print $3}'`
-  secret_key=`grep secret_key $S3CFG | awk '{print $3}'`
+  access_key=`grep access_key $s3cfg | awk '{print $3}'`
+  secret_key=`grep secret_key $s3cfg | awk '{print $3}'`
 
   # parse config
   title_prefix=`$GETCONF $CONFIG title_prefix`
