@@ -38,13 +38,134 @@ class PackLock(object):
         if os.path.isfile(openpath):
             os.remove(openpath)
 
+class PackAction(object):
+    def __init__(self, item_name, files):
+        self.item_name = item_name
+        self.files = files
+
+    def execute(self):
+        msize = 0
+        msize = sum(os.path.getsize(wpath) for wpath in files)
+
+        pack_info = "{} {} {}".format(item_name, len(files), msize)
+
+        self.info("files considered for packing:")
+        for i, path in enumerate(files):
+            self.info("[%5s] %s", i + 1, path)
+
+        self.info("==== %s ====", pack_info)
+
+        itemdir = Series(self.config['xfer_dir'], item_name)
+        if itemdir.exists():
+            raise ItemExists(item_name)
+
+        os.mkdir(itemdir.path)
+
+        # move files into itemdir
+        for f in files:
+            item_fn = self.item_filename(os.path.basename(f))
+            item_path = os.path.join(itemdir.path, item_fn)
+
+            os.rename(f, item_path)
+
+            with open(item_path, 'rb') as f:
+                md = hashlib.md5()
+                while True:
+                    d = f.read(8192)
+                    if not d: break
+                    md.update(d)
+                digest = md.hexdigest()
+            with itemdir.MANIFEST.open() as w:
+                w.write('{} {}\n'.format(digest, item_fn))
+
+        # leave PACKED file
+        self.info("PACKED: %s" pack_info)
+        itemdir.PACKED.write(pack_info + '\n')
+
+class FileSource(object):
+    def __init__(self, srcdir, target_size, file_filter=None,
+                 verify=True):
+        """If `srcdir` has a set of files to fill in `target_size` bucket,
+        return a list of files.
+        """
+        self.srcdir = srcdir
+        self.target_size = target_size
+        if file_filter is None:
+            file_filter = lambda fn: True
+        self.file_filter = file_filter
+
+        self.verify = verify
+
+    @property
+    def finish_drain(self):
+        return os.path.isfile(os.path.join(self.srcdir, 'FINISH_DRAIN'))
+
+    def verify_file(self, path):
+        if path.endswith('.gz'):
+            self.info("  verifying gz: %s", w)
+            try:
+                subprocess.check_call(['gzip', '-t', path])
+            except subprocess.CalledProcessError as ex:
+                return False
+        return True
+
+    def get_files(self):
+        files = [fn for fn in sorted(os.listdir(self.srcdir))
+                 if self.file_filter(fn)]
+
+        # if sum of file size is less than target_size, don't bother
+        # verifying files and return empty, unless FINISH_DRAIN is set.
+        if not self.finish_drain:
+            total_size = 0
+            for fn in files:
+                total_size += os.path.getsize(os.path.join(self.srcdir, fn))
+                if total_size >= self.target_size:
+                    break
+            else:
+                self.info("too few files and FINISH_DRAIN file not found")
+                return []
+
+        total_size = 0
+        mfiles = []
+        for fn in files:
+            path = os.path.join(self.srcdir, fn)
+            if self.verify:
+                if not self.verify_file(path):
+                    # set aside broken files and skip.
+                    # TODO: want to customize how to set aside
+                    # bad gzip files?
+                    self.debug("  mv %s %s.bad", w, w)
+                    badpath = os.path.join(self.srcdir, w + ".bad")
+                    try:
+                        os.rename(path, badpath)
+                    except OSError as ex:
+                        self.error("failed to rename: %s", ex)
+                    continue
+
+            fsize = os.path.getsize(path)
+            if total_size + fsize <= self.target_size:
+                mfiles.append(path)
+                total_size += fsize
+                continue
+
+            # if single file is larger than max_size, make a bundle with
+            # that file.
+            if len(mfiles) == 0:
+                mfiles.append(path)
+                total_size += fsize
+
+            break
+
+        return mfiles
+
 class PackFiles(DrainStep):
     DESCRIPTION = """Collects WARC files into item directory in
     xfer_job_dir"""
 
     SUFFIX_RE = r'\.w?arc(\.gz)?'
 
-    def __init__(self, config, mode, interactive):
+    def __init__(self, config, mode, interactive,
+                 filesource):
         """PackFiles is the collection step. In this step, files are
         collected from source directory as a new item.
 
@@ -59,20 +180,19 @@ class PackFiles(DrainStep):
         self.mode = mode
         self.interactive = interactive
 
-        self.PACKED = PackLock(self.config['job_dir'])
+        self.filesource = filesource
+
+        self.PACKED = PackLock(self.srcdir)
 
     @property
     def source(self):
         return self.config['job_dir']
 
-    @property
-    def finish_drain(self):
-        return os.path.isfile(os.path.join(self.source, 'FINISH_DRAIN'))
 
     def _fnfilter(self):
         pat = re.compile(self._filename_regexp + self.SUFFIX_RE + '$')
-        return pat.match
-    
+        return pat.match is not None
+
     def parse_warc_name(self, basename):
         regex = (
             re.sub(r'\{([^\}\s]+?)}', r'(?P<\1>.*)', self.config.warc_name_pattern) +
@@ -95,11 +215,12 @@ class PackFiles(DrainStep):
         comps = dict(first_comps)
         comps.update({'last' + k: v for k, v in last_comps.items()})
         return self.config.item_name_template.format(**comps)
-        
+
+    # TODO filename translation shall happen during transfer.
     def item_filename(self, basename):
         """Return filename in item. It is identical if ``compact_names`` option
         is off. If it is on, compact name is generated with built-in template.
-        
+
         :param basename: basename of the file
         """
         if self.config['compact_names']:
@@ -118,7 +239,7 @@ class PackFiles(DrainStep):
         ts = datetime.now()
         self.info("pack done. %s", ts.strftime('%Y-%m-%d %H:%M:%S'))
         return rc
-            
+
     def _execute(self):
         files = [fn for fn in sorted(os.listdir(self.source))
                  if self.parse_warc_name(fn)]
@@ -192,7 +313,7 @@ class PackFiles(DrainStep):
                 if item_name is None:
                     self.error('item idnetifier generation failed')
                     return 1
-            
+
                 pack_info = "{} {} {}".format(item_name, len(mfiles), msize)
 
                 self.info("files considered for packing:")
@@ -220,7 +341,7 @@ class PackFiles(DrainStep):
                 else:
                     os.mkdir(itemdir.path)
                     break
-            
+
             # move files in to itemdir
             for f in mfiles:
                 item_fn = self.item_filename(os.path.basename(f))
@@ -248,13 +369,13 @@ class PackFiles(DrainStep):
             if self.mode == 'single' or self.mode == 'test':
                 self.info("mode = %s, exiting normally.", self.mode)
                 break
-            
+
             # start next warc_series
 
             # reset item/manifest
             msize = _msize
             mfiles = _mfiles
-        
+
         self.info("{total_num_warcs} warcs, {gz_ok} count gz_OK, {valid_count} validated, "
                   "{pack_count} packed, {series_count} series".format(**counters))
         return 0
