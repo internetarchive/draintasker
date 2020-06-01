@@ -623,7 +623,7 @@ do
   )
   derive_opts=(--header 'x-archive-queue-derive:1')
   noderive_opts=(--header 'x-archive-queue-derive:0')
-  automakebucket_opts=(--header 'x-amz-auto-make-bucket:1')
+  automakebucket_opts=(--header 'x-archive-auto-make-bucket:1')
   sizehint_opts=(--header "x-archive-size-hint:${size_hint}")
   itemmeta_opts=()
   for m in "${metadata[@]}"; do
@@ -722,6 +722,7 @@ do
 	      copts=(
 		  "${common_opts[@]}"
 		  --header "Content-MD5:${checksum}"
+		  "${automakebucket_opts[@]}"
 		  "${derive_header[@]}"
 		  --upload-file "${filepath}"
 	      )
