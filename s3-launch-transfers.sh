@@ -233,19 +233,22 @@ function check_curl_success {
         then
     	    echo "SUCCESS: S3 PUT succeeded with response_code:"\
                  "$response_code" | tee -a $OPEN
-	    case $upload_type in
-	    auto-make-bucket)
-		bucket_status=1;;
-	    test-add-to-bucket)
-		bucket_status=1
-		echo "creating file: $BUCKET_OK" >>$OPEN
-		echo $bucket > $BUCKET_OK
-		;;
-	    *)
-		if verify_etag; then
-                    write_tombstone >>$OPEN
-		fi
-	    esac
+            case $upload_type in
+                auto-make-bucket)
+                    bucket_status=1
+                    echo "creating file: $BUCKET_OK" >> $OPEN
+                    echo $bucket > $BUCKET_OK
+                    ;;
+                test-add-to-bucket)
+                    bucket_status=1
+                    echo "creating file: $BUCKET_OK" >> $OPEN
+                    echo $bucket > $BUCKET_OK
+                    ;;
+                *)
+                    if verify_etag; then
+                        write_tombstone >>$OPEN
+                    fi
+            esac
             keep_trying='false'
         else
             (( retry_count++ ))
