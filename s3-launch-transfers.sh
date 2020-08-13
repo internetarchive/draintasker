@@ -162,7 +162,7 @@ function verify_etag {
         # and avoids the problem i had using grep + awk + tr 
         # which resulted in a ^M in the output, which failed 
         # the equality test below when it shouldn't have
-        etag=`sed -ne '/ETag/{s/.*"\(.*\)".*/\1/p;q}' $tmpfile`
+        etag=`sed -ne '/^ETag:/I{s/.*"\(.*\)".*/\1/p;q}' $tmpfile`
         if [ "$etag" != "$checksum" ]
         then
             # eventually want to retry, but let's see how often 
