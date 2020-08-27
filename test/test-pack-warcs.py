@@ -1,5 +1,6 @@
 #!/usr/bin/python
 #
+from __future__ import print_function
 import sys
 import os
 import unittest
@@ -31,7 +32,7 @@ class PackWarcsTest(unittest.TestCase):
         total_size = 0
         for w in warcs:
             size = os.path.getsize(w)
-            print "%s %d %d" % (w, size, total_size)
+            print("%s %d %d" % (w, size, total_size))
             if total_size + size > ITEM_SIZE: break
             warcs_packed.append(w)
             total_size += size
