@@ -1,436 +1,707 @@
-#!/usr/bin/env python
-from __future__ import with_statement
-
-from tornado.escape import utf8, _unicode, native_str
-from tornado.httpclient import HTTPRequest, HTTPResponse, HTTPError, AsyncHTTPClient
-from tornado.httputil import HTTPHeaders
+from tornado.escape import _unicode
+from tornado import gen, version
+from tornado.httpclient import (
+    HTTPResponse,
+    HTTPError,
+    AsyncHTTPClient,
+    main,
+    _RequestProxy,
+    HTTPRequest,
+)
+from tornado import httputil
+from tornado.http1connection import HTTP1Connection, HTTP1ConnectionParameters
 from tornado.ioloop import IOLoop
-from tornado.iostream import IOStream, SSLIOStream
-from tornado import stack_context
-from tornado.util import b
+from tornado.iostream import StreamClosedError, IOStream
+from tornado.netutil import (
+    Resolver,
+    OverrideResolver,
+    _client_ssl_defaults,
+    is_valid_ip,
+)
+from tornado.log import gen_log
+from tornado.tcpclient import TCPClient
 
 import base64
 import collections
-import contextlib
 import copy
 import functools
-import logging
-import os.path
 import re
 import socket
+import ssl
+import sys
 import time
-import urlparse
-import zlib
+from io import BytesIO
+import urllib.parse
 
-try:
-    from io import BytesIO  # python 3
-except ImportError:
-    from cStringIO import StringIO as BytesIO  # python 2
+from typing import Dict, Any, Callable, Optional, Type, Union
+from types import TracebackType
+import typing
 
-try:
-    import ssl # python 2.6+
-except ImportError:
-    ssl = None
+if typing.TYPE_CHECKING:
+    from typing import Deque, Tuple, List  # noqa: F401
 
-_DEFAULT_CA_CERTS = os.path.dirname(__file__) + '/ca-certificates.crt'
+
+class HTTPTimeoutError(HTTPError):
+    """Error raised by SimpleAsyncHTTPClient on timeout.
+
+    For historical reasons, this is a subclass of `.HTTPClientError`
+    which simulates a response code of 599.
+
+    .. versionadded:: 5.1
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(599, message=message)
+
+    def __str__(self) -> str:
+        return self.message or "Timeout"
+
+
+class HTTPStreamClosedError(HTTPError):
+    """Error raised by SimpleAsyncHTTPClient when the underlying stream is closed.
+
+    When a more specific exception is available (such as `ConnectionResetError`),
+    it may be raised instead of this one.
+
+    For historical reasons, this is a subclass of `.HTTPClientError`
+    which simulates a response code of 599.
+
+    .. versionadded:: 5.1
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(599, message=message)
+
+    def __str__(self) -> str:
+        return self.message or "Stream closed"
+
 
 class SimpleAsyncHTTPClient(AsyncHTTPClient):
     """Non-blocking HTTP client with no external dependencies.
 
     This class implements an HTTP 1.1 client on top of Tornado's IOStreams.
-    It does not currently implement all applicable parts of the HTTP
-    specification, but it does enough to work with major web service APIs
-    (mostly tested against the Twitter API so far).
-
-    This class has not been tested extensively in production and
-    should be considered somewhat experimental as of the release of
-    tornado 1.2.  It is intended to become the default AsyncHTTPClient
-    implementation in a future release.  It may either be used
-    directly, or to facilitate testing of this class with an existing
-    application, setting the environment variable
-    USE_SIMPLE_HTTPCLIENT=1 will cause this class to transparently
-    replace tornado.httpclient.AsyncHTTPClient.
-
     Some features found in the curl-based AsyncHTTPClient are not yet
     supported.  In particular, proxies are not supported, connections
-    are not reused, and callers cannot select the network interface to be 
+    are not reused, and callers cannot select the network interface to be
     used.
-
-    Python 2.6 or higher is required for HTTPS support.  Users of Python 2.5
-    should use the curl-based AsyncHTTPClient if HTTPS support is required.
-
     """
-    def initialize(self, io_loop=None, max_clients=10,
-                   max_simultaneous_connections=None,
-                   hostname_mapping=None):
+
+    def initialize(  # type: ignore
+        self,
+        max_clients: int = 10,
+        hostname_mapping: Optional[Dict[str, str]] = None,
+        max_buffer_size: int = 104857600,
+        resolver: Optional[Resolver] = None,
+        defaults: Optional[Dict[str, Any]] = None,
+        max_header_size: Optional[int] = None,
+        max_body_size: Optional[int] = None,
+    ) -> None:
         """Creates a AsyncHTTPClient.
 
         Only a single AsyncHTTPClient instance exists per IOLoop
         in order to provide limitations on the number of pending connections.
-        force_instance=True may be used to suppress this behavior.
+        ``force_instance=True`` may be used to suppress this behavior.
 
-        max_clients is the number of concurrent requests that can be in
-        progress.  max_simultaneous_connections has no effect and is accepted
-        only for compatibility with the curl-based AsyncHTTPClient.  Note
-        that these arguments are only used when the client is first created,
-        and will be ignored when an existing client is reused.
+        Note that because of this implicit reuse, unless ``force_instance``
+        is used, only the first call to the constructor actually uses
+        its arguments. It is recommended to use the ``configure`` method
+        instead of the constructor to ensure that arguments take effect.
 
-        hostname_mapping is a dictionary mapping hostnames to IP addresses.
+        ``max_clients`` is the number of concurrent requests that can be
+        in progress; when this limit is reached additional requests will be
+        queued. Note that time spent waiting in this queue still counts
+        against the ``request_timeout``.
+
+        ``hostname_mapping`` is a dictionary mapping hostnames to IP addresses.
         It can be used to make local DNS changes when modifying system-wide
-        settings like /etc/hosts is not possible or desirable (e.g. in
+        settings like ``/etc/hosts`` is not possible or desirable (e.g. in
         unittests).
-        """
-        self.io_loop = io_loop
-        self.max_clients = max_clients
-        self.queue = collections.deque()
-        self.active = {}
-        self.hostname_mapping = hostname_mapping
 
-    def fetch(self, request, callback, **kwargs):
-        if not isinstance(request, HTTPRequest):
-            request = HTTPRequest(url=request, **kwargs)
-        if not isinstance(request.headers, HTTPHeaders):
-            request.headers = HTTPHeaders(request.headers)
-        callback = stack_context.wrap(callback)
-        self.queue.append((request, callback))
+        ``max_buffer_size`` (default 100MB) is the number of bytes
+        that can be read into memory at once. ``max_body_size``
+        (defaults to ``max_buffer_size``) is the largest response body
+        that the client will accept.  Without a
+        ``streaming_callback``, the smaller of these two limits
+        applies; with a ``streaming_callback`` only ``max_body_size``
+        does.
+
+        .. versionchanged:: 4.2
+           Added the ``max_body_size`` argument.
+        """
+        super().initialize(defaults=defaults)
+        self.max_clients = max_clients
+        self.queue = (
+            collections.deque()
+        )  # type: Deque[Tuple[object, HTTPRequest, Callable[[HTTPResponse], None]]]
+        self.active = (
+            {}
+        )  # type: Dict[object, Tuple[HTTPRequest, Callable[[HTTPResponse], None]]]
+        self.waiting = (
+            {}
+        )  # type: Dict[object, Tuple[HTTPRequest, Callable[[HTTPResponse], None], object]]
+        self.max_buffer_size = max_buffer_size
+        self.max_header_size = max_header_size
+        self.max_body_size = max_body_size
+        # TCPClient could create a Resolver for us, but we have to do it
+        # ourselves to support hostname_mapping.
+        if resolver:
+            self.resolver = resolver
+            self.own_resolver = False
+        else:
+            self.resolver = Resolver()
+            self.own_resolver = True
+        if hostname_mapping is not None:
+            self.resolver = OverrideResolver(
+                resolver=self.resolver, mapping=hostname_mapping
+            )
+        self.tcp_client = TCPClient(resolver=self.resolver)
+
+    def close(self) -> None:
+        super().close()
+        if self.own_resolver:
+            self.resolver.close()
+        self.tcp_client.close()
+
+    def fetch_impl(
+        self, request: HTTPRequest, callback: Callable[[HTTPResponse], None]
+    ) -> None:
+        key = object()
+        self.queue.append((key, request, callback))
+        assert request.connect_timeout is not None
+        assert request.request_timeout is not None
+        timeout_handle = None
+        if len(self.active) >= self.max_clients:
+            timeout = (
+                min(request.connect_timeout, request.request_timeout)
+                or request.connect_timeout
+                or request.request_timeout
+            )  # min but skip zero
+            if timeout:
+                timeout_handle = self.io_loop.add_timeout(
+                    self.io_loop.time() + timeout,
+                    functools.partial(self._on_timeout, key, "in request queue"),
+                )
+        self.waiting[key] = (request, callback, timeout_handle)
         self._process_queue()
         if self.queue:
-            logging.debug("max_clients limit reached, request queued. "
-                          "%d active, %d queued requests." % (
-                    len(self.active), len(self.queue)))
+            gen_log.debug(
+                "max_clients limit reached, request queued. "
+                "%d active, %d queued requests." % (len(self.active), len(self.queue))
+            )
 
-    def _process_queue(self):
-        with stack_context.NullContext():
-            while self.queue and len(self.active) < self.max_clients:
-                request, callback = self.queue.popleft()
-                key = object()
-                self.active[key] = (request, callback)
-                _HTTPConnection(self.io_loop, self, request,
-                                functools.partial(self._on_fetch_complete,
-                                                  key, callback))
+    def _process_queue(self) -> None:
+        while self.queue and len(self.active) < self.max_clients:
+            key, request, callback = self.queue.popleft()
+            if key not in self.waiting:
+                continue
+            self._remove_timeout(key)
+            self.active[key] = (request, callback)
+            release_callback = functools.partial(self._release_fetch, key)
+            self._handle_request(request, release_callback, callback)
 
-    def _on_fetch_complete(self, key, callback, response):
+    def _connection_class(self) -> type:
+        return _HTTPConnection
+
+    def _handle_request(
+        self,
+        request: HTTPRequest,
+        release_callback: Callable[[], None],
+        final_callback: Callable[[HTTPResponse], None],
+    ) -> None:
+        self._connection_class()(
+            self,
+            request,
+            release_callback,
+            final_callback,
+            self.max_buffer_size,
+            self.tcp_client,
+            self.max_header_size,
+            self.max_body_size,
+        )
+
+    def _release_fetch(self, key: object) -> None:
         del self.active[key]
-        callback(response)
         self._process_queue()
 
+    def _remove_timeout(self, key: object) -> None:
+        if key in self.waiting:
+            request, callback, timeout_handle = self.waiting[key]
+            if timeout_handle is not None:
+                self.io_loop.remove_timeout(timeout_handle)
+            del self.waiting[key]
+
+    def _on_timeout(self, key: object, info: Optional[str] = None) -> None:
+        """Timeout callback of request.
+
+        Construct a timeout HTTPResponse when a timeout occurs.
+
+        :arg object key: A simple object to mark the request.
+        :info string key: More detailed timeout information.
+        """
+        request, callback, timeout_handle = self.waiting[key]
+        self.queue.remove((key, request, callback))
+
+        error_message = "Timeout {0}".format(info) if info else "Timeout"
+        timeout_response = HTTPResponse(
+            request,
+            599,
+            error=HTTPTimeoutError(error_message),
+            request_time=self.io_loop.time() - request.start_time,
+        )
+        self.io_loop.add_callback(callback, timeout_response)
+        del self.waiting[key]
 
 
-class _HTTPConnection(object):
-    _SUPPORTED_METHODS = set(["GET", "HEAD", "POST", "PUT", "DELETE"])
+class _HTTPConnection(httputil.HTTPMessageDelegate):
+    _SUPPORTED_METHODS = set(
+        ["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+    )
 
-    def __init__(self, io_loop, client, request, callback):
-        self.start_time = time.time()
-        self.io_loop = io_loop
+    def __init__(
+        self,
+        client: Optional[SimpleAsyncHTTPClient],
+        request: HTTPRequest,
+        release_callback: Callable[[], None],
+        final_callback: Callable[[HTTPResponse], None],
+        max_buffer_size: int,
+        tcp_client: TCPClient,
+        max_header_size: int,
+        max_body_size: int,
+    ) -> None:
+        self.io_loop = IOLoop.current()
+        self.start_time = self.io_loop.time()
+        self.start_wall_time = time.time()
         self.client = client
         self.request = request
-        self.callback = callback
-        self.code = None
-        self.headers = None
-        self.chunks = None
+        self.release_callback = release_callback
+        self.final_callback = final_callback
+        self.max_buffer_size = max_buffer_size
+        self.tcp_client = tcp_client
+        self.max_header_size = max_header_size
+        self.max_body_size = max_body_size
+        self.code = None  # type: Optional[int]
+        self.headers = None  # type: Optional[httputil.HTTPHeaders]
+        self.chunks = []  # type: List[bytes]
         self._decompressor = None
         # Timeout handle returned by IOLoop.add_timeout
-        self._timeout = None
-        with stack_context.StackContext(self.cleanup):
-            parsed = urlparse.urlsplit(_unicode(self.request.url))
+        self._timeout = None  # type: object
+        self._sockaddr = None
+        IOLoop.current().add_future(
+            gen.convert_yielded(self.run()), lambda f: f.result()
+        )
+
+    async def run(self) -> None:
+        try:
+            self.parsed = urllib.parse.urlsplit(_unicode(self.request.url))
+            if self.parsed.scheme not in ("http", "https"):
+                raise ValueError("Unsupported url scheme: %s" % self.request.url)
             # urlsplit results have hostname and port results, but they
             # didn't support ipv6 literals until python 2.7.
-            netloc = parsed.netloc
+            netloc = self.parsed.netloc
             if "@" in netloc:
                 userpass, _, netloc = netloc.rpartition("@")
-            match = re.match(r'^(.+):(\d+)$', netloc)
-            if match:
-                host = match.group(1)
-                port = int(match.group(2))
-            else:
-                host = netloc
-                port = 443 if parsed.scheme == "https" else 80
-            if re.match(r'^\[.*\]$', host):
+            host, port = httputil.split_host_and_port(netloc)
+            if port is None:
+                port = 443 if self.parsed.scheme == "https" else 80
+            if re.match(r"^\[.*\]$", host):
                 # raw ipv6 addresses in urls are enclosed in brackets
                 host = host[1:-1]
-            if self.client.hostname_mapping is not None:
-                host = self.client.hostname_mapping.get(host, host)
+            self.parsed_hostname = host  # save final host for _on_connect
 
-            if request.allow_ipv6:
-                af = socket.AF_UNSPEC
-            else:
-                # We only try the first IP we get from getaddrinfo,
-                # so restrict to ipv4 by default.
+            if self.request.allow_ipv6 is False:
                 af = socket.AF_INET
-
-            addrinfo = socket.getaddrinfo(host, port, af, socket.SOCK_STREAM,
-                                          0, 0)
-            af, socktype, proto, canonname, sockaddr = addrinfo[0]
-
-            if parsed.scheme == "https":
-                ssl_options = {}
-                if request.validate_cert:
-                    ssl_options["cert_reqs"] = ssl.CERT_REQUIRED
-                if request.ca_certs is not None:
-                    ssl_options["ca_certs"] = request.ca_certs
-                else:
-                    ssl_options["ca_certs"] = _DEFAULT_CA_CERTS
-                self.stream = SSLIOStream(socket.socket(af, socktype, proto),
-                                          io_loop=self.io_loop,
-                                          ssl_options=ssl_options)
             else:
-                self.stream = IOStream(socket.socket(af, socktype, proto),
-                                       io_loop=self.io_loop)
-            timeout = min(request.connect_timeout, request.request_timeout)
+                af = socket.AF_UNSPEC
+
+            ssl_options = self._get_ssl_options(self.parsed.scheme)
+
+            source_ip = None
+            if self.request.network_interface:
+                if is_valid_ip(self.request.network_interface):
+                    source_ip = self.request.network_interface
+                else:
+                    raise ValueError(
+                        "Unrecognized IPv4 or IPv6 address for network_interface, got %r"
+                        % (self.request.network_interface,)
+                    )
+
+            if self.request.connect_timeout and self.request.request_timeout:
+                timeout = min(
+                    self.request.connect_timeout, self.request.request_timeout
+                )
+            elif self.request.connect_timeout:
+                timeout = self.request.connect_timeout
+            elif self.request.request_timeout:
+                timeout = self.request.request_timeout
+            else:
+                timeout = 0
             if timeout:
-                self._connect_timeout = self.io_loop.add_timeout(
+                self._timeout = self.io_loop.add_timeout(
                     self.start_time + timeout,
-                    self._on_timeout)
-            self.stream.set_close_callback(self._on_close)
-            self.stream.connect(sockaddr,
-                                functools.partial(self._on_connect, parsed))
+                    functools.partial(self._on_timeout, "while connecting"),
+                )
+            stream = await self.tcp_client.connect(
+                host,
+                port,
+                af=af,
+                ssl_options=ssl_options,
+                max_buffer_size=self.max_buffer_size,
+                source_ip=source_ip,
+            )
 
-    def _on_timeout(self):
+            if self.final_callback is None:
+                # final_callback is cleared if we've hit our timeout.
+                stream.close()
+                return
+            self.stream = stream
+            self.stream.set_close_callback(self.on_connection_close)
+            self._remove_timeout()
+            if self.final_callback is None:
+                return
+            if self.request.request_timeout:
+                self._timeout = self.io_loop.add_timeout(
+                    self.start_time + self.request.request_timeout,
+                    functools.partial(self._on_timeout, "during request"),
+                )
+            if (
+                self.request.method not in self._SUPPORTED_METHODS
+                and not self.request.allow_nonstandard_methods
+            ):
+                raise KeyError("unknown method %s" % self.request.method)
+            for key in (
+                "proxy_host",
+                "proxy_port",
+                "proxy_username",
+                "proxy_password",
+                "proxy_auth_mode",
+            ):
+                if getattr(self.request, key, None):
+                    raise NotImplementedError("%s not supported" % key)
+            if "Connection" not in self.request.headers:
+                self.request.headers["Connection"] = "close"
+            if "Host" not in self.request.headers:
+                if "@" in self.parsed.netloc:
+                    self.request.headers["Host"] = self.parsed.netloc.rpartition("@")[
+                        -1
+                    ]
+                else:
+                    self.request.headers["Host"] = self.parsed.netloc
+            username, password = None, None
+            if self.parsed.username is not None:
+                username, password = self.parsed.username, self.parsed.password
+            elif self.request.auth_username is not None:
+                username = self.request.auth_username
+                password = self.request.auth_password or ""
+            if username is not None:
+                assert password is not None
+                if self.request.auth_mode not in (None, "basic"):
+                    raise ValueError("unsupported auth_mode %s", self.request.auth_mode)
+                self.request.headers["Authorization"] = "Basic " + _unicode(
+                    base64.b64encode(
+                        httputil.encode_username_password(username, password)
+                    )
+                )
+            if self.request.user_agent:
+                self.request.headers["User-Agent"] = self.request.user_agent
+            elif self.request.headers.get("User-Agent") is None:
+                self.request.headers["User-Agent"] = "Tornado/{}".format(version)
+            if not self.request.allow_nonstandard_methods:
+                # Some HTTP methods nearly always have bodies while others
+                # almost never do. Fail in this case unless the user has
+                # opted out of sanity checks with allow_nonstandard_methods.
+                body_expected = self.request.method in ("POST", "PATCH", "PUT")
+                body_present = (
+                    self.request.body is not None
+                    or self.request.body_producer is not None
+                )
+                if (body_expected and not body_present) or (
+                    body_present and not body_expected
+                ):
+                    raise ValueError(
+                        "Body must %sbe None for method %s (unless "
+                        "allow_nonstandard_methods is true)"
+                        % ("not " if body_expected else "", self.request.method)
+                    )
+            if self.request.expect_100_continue:
+                self.request.headers["Expect"] = "100-continue"
+            if self.request.body is not None:
+                # When body_producer is used the caller is responsible for
+                # setting Content-Length (or else chunked encoding will be used).
+                self.request.headers["Content-Length"] = str(len(self.request.body))
+            if (
+                self.request.method == "POST"
+                and "Content-Type" not in self.request.headers
+            ):
+                self.request.headers[
+                    "Content-Type"
+                ] = "application/x-www-form-urlencoded"
+            if self.request.decompress_response:
+                self.request.headers["Accept-Encoding"] = "gzip"
+            req_path = (self.parsed.path or "/") + (
+                ("?" + self.parsed.query) if self.parsed.query else ""
+            )
+            self.connection = self._create_connection(stream)
+            start_line = httputil.RequestStartLine(self.request.method, req_path, "")
+            self.connection.write_headers(start_line, self.request.headers)
+            if self.request.expect_100_continue:
+                await self.connection.read_response(self)
+            else:
+                await self._write_body(True)
+        except Exception:
+            if not self._handle_exception(*sys.exc_info()):
+                raise
+
+    def _get_ssl_options(
+        self, scheme: str
+    ) -> Union[None, Dict[str, Any], ssl.SSLContext]:
+        if scheme == "https":
+            if self.request.ssl_options is not None:
+                return self.request.ssl_options
+            # If we are using the defaults, don't construct a
+            # new SSLContext.
+            if (
+                self.request.validate_cert
+                and self.request.ca_certs is None
+                and self.request.client_cert is None
+                and self.request.client_key is None
+            ):
+                return _client_ssl_defaults
+            ssl_ctx = ssl.create_default_context(
+                ssl.Purpose.SERVER_AUTH, cafile=self.request.ca_certs
+            )
+            if not self.request.validate_cert:
+                ssl_ctx.check_hostname = False
+                ssl_ctx.verify_mode = ssl.CERT_NONE
+            if self.request.client_cert is not None:
+                ssl_ctx.load_cert_chain(
+                    self.request.client_cert, self.request.client_key
+                )
+            if hasattr(ssl, "OP_NO_COMPRESSION"):
+                # See netutil.ssl_options_to_context
+                ssl_ctx.options |= ssl.OP_NO_COMPRESSION
+            return ssl_ctx
+        return None
+
+    def _on_timeout(self, info: Optional[str] = None) -> None:
+        """Timeout callback of _HTTPConnection instance.
+
+        Raise a `HTTPTimeoutError` when a timeout occurs.
+
+        :info string key: More detailed timeout information.
+        """
         self._timeout = None
-        if self.callback is not None:
-            self.callback(HTTPResponse(self.request, 599,
-                                       error=HTTPError(599, "Timeout")))
-            self.callback = None
-        self.stream.close()
+        error_message = "Timeout {0}".format(info) if info else "Timeout"
+        if self.final_callback is not None:
+            self._handle_exception(
+                HTTPTimeoutError, HTTPTimeoutError(error_message), None
+            )
 
-    def _on_connect(self, parsed):
-        if self._timeout is not None:
-            self.io_loop.remove_callback(self._timeout)
-            self._timeout = None
-        if self.request.request_timeout:
-            self._timeout = self.io_loop.add_timeout(
-                self.start_time + self.request.request_timeout,
-                self._on_timeout)
-        if (self.request.validate_cert and
-            isinstance(self.stream, SSLIOStream)):
-            match_hostname(self.stream.socket.getpeercert(),
-                           parsed.hostname)
-        if (self.request.method not in self._SUPPORTED_METHODS and
-            not self.request.allow_nonstandard_methods):
-            raise KeyError("unknown method %s" % self.request.method)
-        for key in ('network_interface',
-                    'proxy_host', 'proxy_port',
-                    'proxy_username', 'proxy_password'):
-            if getattr(self.request, key, None):
-                raise NotImplementedError('%s not supported' % key)
-        if "Host" not in self.request.headers:
-            self.request.headers["Host"] = parsed.netloc
-        username, password = None, None
-        if parsed.username is not None:
-            username, password = parsed.username, parsed.password
-        elif self.request.auth_username is not None:
-            username = self.request.auth_username
-            password = self.request.auth_password
-        if username is not None:
-            auth = utf8(username) + b(":") + utf8(password)
-            self.request.headers["Authorization"] = (b("Basic ") +
-                                                     base64.b64encode(auth))
-        if self.request.user_agent:
-            self.request.headers["User-Agent"] = self.request.user_agent
-        has_body = self.request.method in ("POST", "PUT")
-        if has_body:
-            assert self.request.body is not None
-            self.request.headers["Content-Length"] = str(len(
-                self.request.body))
-        else:
-            assert self.request.body is None
-        if (self.request.method == "POST" and
-            "Content-Type" not in self.request.headers):
-            self.request.headers["Content-Type"] = "application/x-www-form-urlencoded"
-        if self.request.use_gzip:
-            self.request.headers["Accept-Encoding"] = "gzip"
-        req_path = ((parsed.path or '/') +
-                (('?' + parsed.query) if parsed.query else ''))
-        request_lines = [utf8("%s %s HTTP/1.1" % (self.request.method,
-                                                  req_path))]
-        for k, v in self.request.headers.get_all():
-            line = utf8(k) + b(": ") + utf8(v)
-            if b('\n') in line:
-                raise ValueError('Newline in header: ' + repr(line))
-            request_lines.append(line)
-        self.stream.write(b("\r\n").join(request_lines) + b("\r\n\r\n"))
-        if has_body:
-            self.stream.write(self.request.body)
-        self.stream.read_until(b("\r\n\r\n"), self._on_headers)
-
-    @contextlib.contextmanager
-    def cleanup(self):
-        try:
-            yield
-        except Exception, e:
-            logging.warning("uncaught exception", exc_info=True)
-            if self.callback is not None:
-                callback = self.callback
-                self.callback = None
-                callback(HTTPResponse(self.request, 599, error=e))
-
-    def _on_close(self):
-        if self.callback is not None:
-            callback = self.callback
-            self.callback = None
-            callback(HTTPResponse(self.request, 599,
-                                  error=HTTPError(599, "Connection closed")))
-
-    def _on_headers(self, data):
-        data = native_str(data.decode("latin1"))
-        first_line, _, header_data = data.partition("\r\n")
-        match = re.match("HTTP/1.[01] ([0-9]+)", first_line)
-        assert match
-        self.code = int(match.group(1))
-        self.headers = HTTPHeaders.parse(header_data)
-        if self.request.header_callback is not None:
-            for k, v in self.headers.get_all():
-                self.request.header_callback("%s: %s\r\n" % (k, v))
-        if (self.request.use_gzip and
-            self.headers.get("Content-Encoding") == "gzip"):
-            # Magic parameter makes zlib module understand gzip header
-            # http://stackoverflow.com/questions/1838699/how-can-i-decompress-a-gzip-stream-with-zlib
-            self._decompressor = zlib.decompressobj(16+zlib.MAX_WBITS)
-        if self.headers.get("Transfer-Encoding") == "chunked":
-            self.chunks = []
-            self.stream.read_until(b("\r\n"), self._on_chunk_length)
-        elif "Content-Length" in self.headers:
-            self.stream.read_bytes(int(self.headers["Content-Length"]),
-                                   self._on_body)
-        else:
-            raise Exception("No Content-length or chunked encoding, "
-                            "don't know how to read %s", self.request.url)
-
-    def _on_body(self, data):
+    def _remove_timeout(self) -> None:
         if self._timeout is not None:
             self.io_loop.remove_timeout(self._timeout)
             self._timeout = None
-        if self._decompressor:
-            data = self._decompressor.decompress(data)
+
+    def _create_connection(self, stream: IOStream) -> HTTP1Connection:
+        stream.set_nodelay(True)
+        connection = HTTP1Connection(
+            stream,
+            True,
+            HTTP1ConnectionParameters(
+                no_keep_alive=True,
+                max_header_size=self.max_header_size,
+                max_body_size=self.max_body_size,
+                decompress=bool(self.request.decompress_response),
+            ),
+            self._sockaddr,
+        )
+        return connection
+
+    async def _write_body(self, start_read: bool) -> None:
+        if self.request.body is not None:
+            self.connection.write(self.request.body)
+        elif self.request.body_producer is not None:
+            fut = self.request.body_producer(self.connection.write)
+            if fut is not None:
+                await fut
+        self.connection.finish()
+        if start_read:
+            try:
+                await self.connection.read_response(self)
+            except StreamClosedError:
+                if not self._handle_exception(*sys.exc_info()):
+                    raise
+
+    def _release(self) -> None:
+        if self.release_callback is not None:
+            release_callback = self.release_callback
+            self.release_callback = None  # type: ignore
+            release_callback()
+
+    def _run_callback(self, response: HTTPResponse) -> None:
+        self._release()
+        if self.final_callback is not None:
+            final_callback = self.final_callback
+            self.final_callback = None  # type: ignore
+            self.io_loop.add_callback(final_callback, response)
+
+    def _handle_exception(
+        self,
+        typ: "Optional[Type[BaseException]]",
+        value: Optional[BaseException],
+        tb: Optional[TracebackType],
+    ) -> bool:
+        if self.final_callback:
+            self._remove_timeout()
+            if isinstance(value, StreamClosedError):
+                if value.real_error is None:
+                    value = HTTPStreamClosedError("Stream closed")
+                else:
+                    value = value.real_error
+            self._run_callback(
+                HTTPResponse(
+                    self.request,
+                    599,
+                    error=value,
+                    request_time=self.io_loop.time() - self.start_time,
+                    start_time=self.start_wall_time,
+                )
+            )
+
+            if hasattr(self, "stream"):
+                # TODO: this may cause a StreamClosedError to be raised
+                # by the connection's Future.  Should we cancel the
+                # connection more gracefully?
+                self.stream.close()
+            return True
+        else:
+            # If our callback has already been called, we are probably
+            # catching an exception that is not caused by us but rather
+            # some child of our callback. Rather than drop it on the floor,
+            # pass it along, unless it's just the stream being closed.
+            return isinstance(value, StreamClosedError)
+
+    def on_connection_close(self) -> None:
+        if self.final_callback is not None:
+            message = "Connection closed"
+            if self.stream.error:
+                raise self.stream.error
+            try:
+                raise HTTPStreamClosedError(message)
+            except HTTPStreamClosedError:
+                self._handle_exception(*sys.exc_info())
+
+    async def headers_received(
+        self,
+        first_line: Union[httputil.ResponseStartLine, httputil.RequestStartLine],
+        headers: httputil.HTTPHeaders,
+    ) -> None:
+        assert isinstance(first_line, httputil.ResponseStartLine)
+        if self.request.expect_100_continue and first_line.code == 100:
+            await self._write_body(False)
+            return
+        self.code = first_line.code
+        self.reason = first_line.reason
+        self.headers = headers
+
+        if self._should_follow_redirect():
+            return
+
+        if self.request.header_callback is not None:
+            # Reassemble the start line.
+            self.request.header_callback("%s %s %s\r\n" % first_line)
+            for k, v in self.headers.get_all():
+                self.request.header_callback("%s: %s\r\n" % (k, v))
+            self.request.header_callback("\r\n")
+
+    def _should_follow_redirect(self) -> bool:
+        if self.request.follow_redirects:
+            assert self.request.max_redirects is not None
+            return (
+                self.code in (301, 302, 303, 307, 308)
+                and self.request.max_redirects > 0
+                and self.headers is not None
+                and self.headers.get("Location") is not None
+            )
+        return False
+
+    def finish(self) -> None:
+        assert self.code is not None
+        data = b"".join(self.chunks)
+        self._remove_timeout()
+        original_request = getattr(self.request, "original_request", self.request)
+        if self._should_follow_redirect():
+            assert isinstance(self.request, _RequestProxy)
+            assert self.headers is not None
+            new_request = copy.copy(self.request.request)
+            new_request.url = urllib.parse.urljoin(
+                self.request.url, self.headers["Location"]
+            )
+            assert self.request.max_redirects is not None
+            new_request.max_redirects = self.request.max_redirects - 1
+            del new_request.headers["Host"]
+            # https://tools.ietf.org/html/rfc7231#section-6.4
+            #
+            # The original HTTP spec said that after a 301 or 302
+            # redirect, the request method should be preserved.
+            # However, browsers implemented this by changing the
+            # method to GET, and the behavior stuck. 303 redirects
+            # always specified this POST-to-GET behavior, arguably
+            # for *all* methods, but libcurl < 7.70 only does this
+            # for POST, while libcurl >= 7.70 does it for other methods.
+            if (self.code == 303 and self.request.method != "HEAD") or (
+                self.code in (301, 302) and self.request.method == "POST"
+            ):
+                new_request.method = "GET"
+                new_request.body = None  # type: ignore
+                for h in [
+                    "Content-Length",
+                    "Content-Type",
+                    "Content-Encoding",
+                    "Transfer-Encoding",
+                ]:
+                    try:
+                        del self.request.headers[h]
+                    except KeyError:
+                        pass
+            new_request.original_request = original_request  # type: ignore
+            final_callback = self.final_callback
+            self.final_callback = None  # type: ignore
+            self._release()
+            assert self.client is not None
+            fut = self.client.fetch(new_request, raise_error=False)
+            fut.add_done_callback(lambda f: final_callback(f.result()))
+            self._on_end_request()
+            return
         if self.request.streaming_callback:
-            if self.chunks is None:
-                # if chunks is not None, we already called streaming_callback
-                # in _on_chunk_data
-                self.request.streaming_callback(data)
             buffer = BytesIO()
         else:
-            buffer = BytesIO(data) # TODO: don't require one big string?
-        original_request = getattr(self.request, "original_request",
-                                   self.request)
-        if (self.request.follow_redirects and
-            self.request.max_redirects > 0 and
-            self.code in (301, 302)):
-            new_request = copy.copy(self.request)
-            new_request.url = urlparse.urljoin(self.request.url,
-                                               self.headers["Location"])
-            new_request.max_redirects -= 1
-            del new_request.headers["Host"]
-            new_request.original_request = original_request
-            self.client.fetch(new_request, self.callback)
-            self.callback = None
+            buffer = BytesIO(data)  # TODO: don't require one big string?
+        response = HTTPResponse(
+            original_request,
+            self.code,
+            reason=getattr(self, "reason", None),
+            headers=self.headers,
+            request_time=self.io_loop.time() - self.start_time,
+            start_time=self.start_wall_time,
+            buffer=buffer,
+            effective_url=self.request.url,
+        )
+        self._run_callback(response)
+        self._on_end_request()
+
+    def _on_end_request(self) -> None:
+        self.stream.close()
+
+    def data_received(self, chunk: bytes) -> None:
+        if self._should_follow_redirect():
+            # We're going to follow a redirect so just discard the body.
             return
-        response = HTTPResponse(original_request,
-                                self.code, headers=self.headers,
-                                buffer=buffer,
-                                effective_url=self.request.url)
-        self.callback(response)
-        self.callback = None
-
-    def _on_chunk_length(self, data):
-        # TODO: "chunk extensions" http://tools.ietf.org/html/rfc2616#section-3.6.1
-        length = int(data.strip(), 16)
-        if length == 0:
-            # all the data has been decompressed, so we don't need to
-            # decompress again in _on_body
-            self._decompressor = None
-            self._on_body(b('').join(self.chunks))
-        else:
-            self.stream.read_bytes(length + 2,  # chunk ends with \r\n
-                              self._on_chunk_data)
-
-    def _on_chunk_data(self, data):
-        assert data[-2:] == b("\r\n")
-        chunk = data[:-2]
-        if self._decompressor:
-            chunk = self._decompressor.decompress(chunk)
         if self.request.streaming_callback is not None:
             self.request.streaming_callback(chunk)
         else:
             self.chunks.append(chunk)
-        self.stream.read_until(b("\r\n"), self._on_chunk_length)
 
-
-# match_hostname was added to the standard library ssl module in python 3.2.
-# The following code was backported for older releases and copied from
-# https://bitbucket.org/brandon/backports.ssl_match_hostname
-class CertificateError(ValueError):
-    pass
-
-def _dnsname_to_pat(dn):
-    pats = []
-    for frag in dn.split(r'.'):
-        if frag == '*':
-            # When '*' is a fragment by itself, it matches a non-empty dotless
-            # fragment.
-            pats.append('[^.]+')
-        else:
-            # Otherwise, '*' matches any dotless fragment.
-            frag = re.escape(frag)
-            pats.append(frag.replace(r'\*', '[^.]*'))
-    return re.compile(r'\A' + r'\.'.join(pats) + r'\Z', re.IGNORECASE)
-
-def match_hostname(cert, hostname):
-    """Verify that *cert* (in decoded format as returned by
-    SSLSocket.getpeercert()) matches the *hostname*.  RFC 2818 rules
-    are mostly followed, but IP addresses are not accepted for *hostname*.
-
-    CertificateError is raised on failure. On success, the function
-    returns nothing.
-    """
-    if not cert:
-        raise ValueError("empty or no certificate")
-    dnsnames = []
-    san = cert.get('subjectAltName', ())
-    for key, value in san:
-        if key == 'DNS':
-            if _dnsname_to_pat(value).match(hostname):
-                return
-            dnsnames.append(value)
-    if not san:
-        # The subject is only checked when subjectAltName is empty
-        for sub in cert.get('subject', ()):
-            for key, value in sub:
-                # XXX according to RFC 2818, the most specific Common Name
-                # must be used.
-                if key == 'commonName':
-                    if _dnsname_to_pat(value).match(hostname):
-                        return
-                    dnsnames.append(value)
-    if len(dnsnames) > 1:
-        raise CertificateError("hostname %r "
-            "doesn't match either of %s"
-            % (hostname, ', '.join(map(repr, dnsnames))))
-    elif len(dnsnames) == 1:
-        raise CertificateError("hostname %r "
-            "doesn't match %r"
-            % (hostname, dnsnames[0]))
-    else:
-        raise CertificateError("no appropriate commonName or "
-            "subjectAltName fields were found")
-
-def main():
-    from tornado.options import define, options, parse_command_line
-    define("print_headers", type=bool, default=False)
-    define("print_body", type=bool, default=True)
-    define("follow_redirects", type=bool, default=True)
-    args = parse_command_line()
-    client = SimpleAsyncHTTPClient()
-    io_loop = IOLoop.instance()
-    for arg in args:
-        def callback(response):
-            io_loop.stop()
-            response.rethrow()
-            if options.print_headers:
-                print response.headers
-            if options.print_body:
-                print response.body
-        client.fetch(arg, callback, follow_redirects=options.follow_redirects)
-        io_loop.start()
 
 if __name__ == "__main__":
+    AsyncHTTPClient.configure(SimpleAsyncHTTPClient)
     main()

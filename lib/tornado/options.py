@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 #
 # Copyright 2009 Facebook
 #
@@ -16,8 +15,19 @@
 
 """A command line parsing module that lets modules define their own options.
 
-Each module defines its own options, e.g.::
+This module is inspired by Google's `gflags
+<https://github.com/google/python-gflags>`_. The primary difference
+with libraries such as `argparse` is that a global registry is used so
+that options may be defined in any module (it also enables
+`tornado.log` by default). The rest of Tornado does not depend on this
+module, so feel free to use `argparse` or other configuration
+libraries if you prefer them.
 
+Options must be defined with `tornado.options.define` before use,
+generally at the top level of a module. The options are then
+accessible as attributes of `tornado.options.options`::
+
+    # myapp/db.py
     from tornado.options import define, options
 
     define("mysql_host", default="127.0.0.1:3306", help="Main user DB")
@@ -28,217 +38,572 @@ Each module defines its own options, e.g.::
         db = database.Connection(options.mysql_host)
         ...
 
-The main() method of your application does not need to be aware of all of
+    # myapp/server.py
+    from tornado.options import define, options
+
+    define("port", default=8080, help="port to listen on")
+
+    def start_server():
+        app = make_app()
+        app.listen(options.port)
+
+The ``main()`` method of your application does not need to be aware of all of
 the options used throughout your program; they are all automatically loaded
-when the modules are loaded. Your main() method can parse the command line
-or parse a config file with::
+when the modules are loaded.  However, all modules that define options
+must have been imported before the command line is parsed.
 
+Your ``main()`` method can parse the command line or parse a config file with
+either `parse_command_line` or `parse_config_file`::
+
+    import myapp.db, myapp.server
     import tornado.options
-    tornado.options.parse_config_file("/etc/server.conf")
-    tornado.options.parse_command_line()
 
-Command line formats are what you would expect ("--myoption=myvalue").
-Config files are just Python files. Global names become options, e.g.::
+    if __name__ == '__main__':
+        tornado.options.parse_command_line()
+        # or
+        tornado.options.parse_config_file("/etc/server.conf")
 
-    myoption = "myvalue"
-    myotheroption = "myothervalue"
+.. note::
 
-We support datetimes, timedeltas, ints, and floats (just pass a 'type'
-kwarg to define). We also accept multi-value options. See the documentation
-for define() below.
+   When using multiple ``parse_*`` functions, pass ``final=False`` to all
+   but the last one, or side effects may occur twice (in particular,
+   this can result in log messages being doubled).
+
+`tornado.options.options` is a singleton instance of `OptionParser`, and
+the top-level functions in this module (`define`, `parse_command_line`, etc)
+simply call methods on it.  You may create additional `OptionParser`
+instances to define isolated sets of options, such as for subcommands.
+
+.. note::
+
+   By default, several options are defined that will configure the
+   standard `logging` module when `parse_command_line` or `parse_config_file`
+   are called.  If you want Tornado to leave the logging configuration
+   alone so you can manage it yourself, either pass ``--logging=none``
+   on the command line or do the following to disable it in code::
+
+       from tornado.options import options, parse_command_line
+       options.logging = None
+       parse_command_line()
+
+.. versionchanged:: 4.3
+   Dashes and underscores are fully interchangeable in option names;
+   options can be defined, set, and read with any mix of the two.
+   Dashes are typical for command-line usage while config files require
+   underscores.
 """
 
 import datetime
-import logging
-import logging.handlers
+import numbers
 import re
 import sys
-import time
+import os
+import textwrap
 
-from tornado.escape import _unicode
+from tornado.escape import _unicode, native_str
+from tornado.log import define_logging_options
+from tornado.util import basestring_type, exec_in
 
-# For pretty log messages, if available
-try:
-    import curses
-except:
-    curses = None
+from typing import (
+    Any,
+    Iterator,
+    Iterable,
+    Tuple,
+    Set,
+    Dict,
+    Callable,
+    List,
+    TextIO,
+    Optional,
+)
 
 
-def define(name, default=None, type=None, help=None, metavar=None,
-           multiple=False):
-    """Defines a new command line option.
+class Error(Exception):
+    """Exception raised by errors in the options module."""
 
-    If type is given (one of str, float, int, datetime, or timedelta)
-    or can be inferred from the default, we parse the command line
-    arguments based on the given type. If multiple is True, we accept
-    comma-separated values, and the option value is always a list.
+    pass
 
-    For multi-value integers, we also accept the syntax x:y, which
-    turns into range(x, y) - very useful for long integer ranges.
 
-    help and metavar are used to construct the automatically generated
-    command line help string. The help message is formatted like::
+class OptionParser(object):
+    """A collection of options, a dictionary with object-like access.
 
-       --name=METAVAR      help string
-
-    Command line option names must be unique globally. They can be parsed
-    from the command line with parse_command_line() or parsed from a
-    config file with parse_config_file.
+    Normally accessed via static functions in the `tornado.options` module,
+    which reference a global instance.
     """
-    if name in options:
-        raise Error("Option %r already defined in %s", name,
-                    options[name].file_name)
-    frame = sys._getframe(0)
-    options_file = frame.f_code.co_filename
-    file_name = frame.f_back.f_code.co_filename
-    if file_name == options_file: file_name = ""
-    if type is None:
-        if not multiple and default is not None:
-            type = default.__class__
-        else:
-            type = str
-    options[name] = _Option(name, file_name=file_name, default=default,
-                            type=type, help=help, metavar=metavar,
-                            multiple=multiple)
 
+    def __init__(self) -> None:
+        # we have to use self.__dict__ because we override setattr.
+        self.__dict__["_options"] = {}
+        self.__dict__["_parse_callbacks"] = []
+        self.define(
+            "help",
+            type=bool,
+            help="show this help information",
+            callback=self._help_callback,
+        )
 
-def parse_command_line(args=None):
-    """Parses all options given on the command line.
+    def _normalize_name(self, name: str) -> str:
+        return name.replace("_", "-")
 
-    We return all command line arguments that are not options as a list.
-    """
-    if args is None: args = sys.argv
-    remaining = []
-    for i in xrange(1, len(args)):
-        # All things after the last option are command line arguments
-        if not args[i].startswith("-"):
-            remaining = args[i:]
-            break
-        if args[i] == "--":
-            remaining = args[i+1:]
-            break
-        arg = args[i].lstrip("-")
-        name, equals, value = arg.partition("=")
-        name = name.replace('-', '_')
-        if not name in options:
-            print_help()
-            raise Error('Unrecognized command line option: %r' % name)
-        option = options[name]
-        if not equals:
-            if option.type == bool:
-                value = "true"
-            else:
-                raise Error('Option %r requires a value' % name)
-        option.parse(value)
-    if options.help:
-        print_help()
-        sys.exit(0)
-
-    # Set up log level and pretty console logging by default
-    if options.logging != 'none':
-        logging.getLogger().setLevel(getattr(logging, options.logging.upper()))
-        enable_pretty_logging()
-
-    return remaining
-
-
-def parse_config_file(path):
-    """Parses and loads the Python config file at the given path."""
-    config = {}
-    execfile(path, config, config)
-    for name in config:
-        if name in options:
-            options[name].set(config[name])
-
-
-def print_help(file=sys.stdout):
-    """Prints all the command line options to stdout."""
-    print >> file, "Usage: %s [OPTIONS]" % sys.argv[0]
-    print >> file, ""
-    print >> file, "Options:"
-    by_file = {}
-    for option in options.itervalues():
-        by_file.setdefault(option.file_name, []).append(option)
-
-    for filename, o in sorted(by_file.items()):
-        if filename: print >> file, filename
-        o.sort(key=lambda option: option.name)
-        for option in o:
-            prefix = option.name
-            if option.metavar:
-                prefix += "=" + option.metavar
-            print >> file, "  --%-30s %s" % (prefix, option.help or "")
-    print >> file
-
-
-class _Options(dict):
-    """Our global program options, an dictionary with object-like access."""
-    @classmethod
-    def instance(cls):
-        if not hasattr(cls, "_instance"):
-            cls._instance = cls()
-        return cls._instance
-
-    def __getattr__(self, name):
-        if isinstance(self.get(name), _Option):
-            return self[name].value()
+    def __getattr__(self, name: str) -> Any:
+        name = self._normalize_name(name)
+        if isinstance(self._options.get(name), _Option):
+            return self._options[name].value()
         raise AttributeError("Unrecognized option %r" % name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        name = self._normalize_name(name)
+        if isinstance(self._options.get(name), _Option):
+            return self._options[name].set(value)
+        raise AttributeError("Unrecognized option %r" % name)
+
+    def __iter__(self) -> Iterator:
+        return (opt.name for opt in self._options.values())
+
+    def __contains__(self, name: str) -> bool:
+        name = self._normalize_name(name)
+        return name in self._options
+
+    def __getitem__(self, name: str) -> Any:
+        return self.__getattr__(name)
+
+    def __setitem__(self, name: str, value: Any) -> None:
+        return self.__setattr__(name, value)
+
+    def items(self) -> Iterable[Tuple[str, Any]]:
+        """An iterable of (name, value) pairs.
+
+        .. versionadded:: 3.1
+        """
+        return [(opt.name, opt.value()) for name, opt in self._options.items()]
+
+    def groups(self) -> Set[str]:
+        """The set of option-groups created by ``define``.
+
+        .. versionadded:: 3.1
+        """
+        return set(opt.group_name for opt in self._options.values())
+
+    def group_dict(self, group: str) -> Dict[str, Any]:
+        """The names and values of options in a group.
+
+        Useful for copying options into Application settings::
+
+            from tornado.options import define, parse_command_line, options
+
+            define('template_path', group='application')
+            define('static_path', group='application')
+
+            parse_command_line()
+
+            application = Application(
+                handlers, **options.group_dict('application'))
+
+        .. versionadded:: 3.1
+        """
+        return dict(
+            (opt.name, opt.value())
+            for name, opt in self._options.items()
+            if not group or group == opt.group_name
+        )
+
+    def as_dict(self) -> Dict[str, Any]:
+        """The names and values of all options.
+
+        .. versionadded:: 3.1
+        """
+        return dict((opt.name, opt.value()) for name, opt in self._options.items())
+
+    def define(
+        self,
+        name: str,
+        default: Any = None,
+        type: Optional[type] = None,
+        help: Optional[str] = None,
+        metavar: Optional[str] = None,
+        multiple: bool = False,
+        group: Optional[str] = None,
+        callback: Optional[Callable[[Any], None]] = None,
+    ) -> None:
+        """Defines a new command line option.
+
+        ``type`` can be any of `str`, `int`, `float`, `bool`,
+        `~datetime.datetime`, or `~datetime.timedelta`. If no ``type``
+        is given but a ``default`` is, ``type`` is the type of
+        ``default``. Otherwise, ``type`` defaults to `str`.
+
+        If ``multiple`` is True, the option value is a list of ``type``
+        instead of an instance of ``type``.
+
+        ``help`` and ``metavar`` are used to construct the
+        automatically generated command line help string. The help
+        message is formatted like::
+
+           --name=METAVAR      help string
+
+        ``group`` is used to group the defined options in logical
+        groups. By default, command line options are grouped by the
+        file in which they are defined.
+
+        Command line option names must be unique globally.
+
+        If a ``callback`` is given, it will be run with the new value whenever
+        the option is changed.  This can be used to combine command-line
+        and file-based options::
+
+            define("config", type=str, help="path to config file",
+                   callback=lambda path: parse_config_file(path, final=False))
+
+        With this definition, options in the file specified by ``--config`` will
+        override options set earlier on the command line, but can be overridden
+        by later flags.
+
+        """
+        normalized = self._normalize_name(name)
+        if normalized in self._options:
+            raise Error(
+                "Option %r already defined in %s"
+                % (normalized, self._options[normalized].file_name)
+            )
+        frame = sys._getframe(0)
+        if frame is not None:
+            options_file = frame.f_code.co_filename
+
+            # Can be called directly, or through top level define() fn, in which
+            # case, step up above that frame to look for real caller.
+            if (
+                frame.f_back is not None
+                and frame.f_back.f_code.co_filename == options_file
+                and frame.f_back.f_code.co_name == "define"
+            ):
+                frame = frame.f_back
+
+            assert frame.f_back is not None
+            file_name = frame.f_back.f_code.co_filename
+        else:
+            file_name = "<unknown>"
+        if file_name == options_file:
+            file_name = ""
+        if type is None:
+            if not multiple and default is not None:
+                type = default.__class__
+            else:
+                type = str
+        if group:
+            group_name = group  # type: Optional[str]
+        else:
+            group_name = file_name
+        option = _Option(
+            name,
+            file_name=file_name,
+            default=default,
+            type=type,
+            help=help,
+            metavar=metavar,
+            multiple=multiple,
+            group_name=group_name,
+            callback=callback,
+        )
+        self._options[normalized] = option
+
+    def parse_command_line(
+        self, args: Optional[List[str]] = None, final: bool = True
+    ) -> List[str]:
+        """Parses all options given on the command line (defaults to
+        `sys.argv`).
+
+        Options look like ``--option=value`` and are parsed according
+        to their ``type``. For boolean options, ``--option`` is
+        equivalent to ``--option=true``
+
+        If the option has ``multiple=True``, comma-separated values
+        are accepted. For multi-value integer options, the syntax
+        ``x:y`` is also accepted and equivalent to ``range(x, y)``.
+
+        Note that ``args[0]`` is ignored since it is the program name
+        in `sys.argv`.
+
+        We return a list of all arguments that are not parsed as options.
+
+        If ``final`` is ``False``, parse callbacks will not be run.
+        This is useful for applications that wish to combine configurations
+        from multiple sources.
+
+        """
+        if args is None:
+            args = sys.argv
+        remaining = []  # type: List[str]
+        for i in range(1, len(args)):
+            # All things after the last option are command line arguments
+            if not args[i].startswith("-"):
+                remaining = args[i:]
+                break
+            if args[i] == "--":
+                remaining = args[i + 1 :]
+                break
+            arg = args[i].lstrip("-")
+            name, equals, value = arg.partition("=")
+            name = self._normalize_name(name)
+            if name not in self._options:
+                self.print_help()
+                raise Error("Unrecognized command line option: %r" % name)
+            option = self._options[name]
+            if not equals:
+                if option.type == bool:
+                    value = "true"
+                else:
+                    raise Error("Option %r requires a value" % name)
+            option.parse(value)
+
+        if final:
+            self.run_parse_callbacks()
+
+        return remaining
+
+    def parse_config_file(self, path: str, final: bool = True) -> None:
+        """Parses and loads the config file at the given path.
+
+        The config file contains Python code that will be executed (so
+        it is **not safe** to use untrusted config files). Anything in
+        the global namespace that matches a defined option will be
+        used to set that option's value.
+
+        Options may either be the specified type for the option or
+        strings (in which case they will be parsed the same way as in
+        `.parse_command_line`)
+
+        Example (using the options defined in the top-level docs of
+        this module)::
+
+            port = 80
+            mysql_host = 'mydb.example.com:3306'
+            # Both lists and comma-separated strings are allowed for
+            # multiple=True.
+            memcache_hosts = ['cache1.example.com:11011',
+                              'cache2.example.com:11011']
+            memcache_hosts = 'cache1.example.com:11011,cache2.example.com:11011'
+
+        If ``final`` is ``False``, parse callbacks will not be run.
+        This is useful for applications that wish to combine configurations
+        from multiple sources.
+
+        .. note::
+
+            `tornado.options` is primarily a command-line library.
+            Config file support is provided for applications that wish
+            to use it, but applications that prefer config files may
+            wish to look at other libraries instead.
+
+        .. versionchanged:: 4.1
+           Config files are now always interpreted as utf-8 instead of
+           the system default encoding.
+
+        .. versionchanged:: 4.4
+           The special variable ``__file__`` is available inside config
+           files, specifying the absolute path to the config file itself.
+
+        .. versionchanged:: 5.1
+           Added the ability to set options via strings in config files.
+
+        """
+        config = {"__file__": os.path.abspath(path)}
+        with open(path, "rb") as f:
+            exec_in(native_str(f.read()), config, config)
+        for name in config:
+            normalized = self._normalize_name(name)
+            if normalized in self._options:
+                option = self._options[normalized]
+                if option.multiple:
+                    if not isinstance(config[name], (list, str)):
+                        raise Error(
+                            "Option %r is required to be a list of %s "
+                            "or a comma-separated string"
+                            % (option.name, option.type.__name__)
+                        )
+
+                if type(config[name]) == str and option.type != str:
+                    option.parse(config[name])
+                else:
+                    option.set(config[name])
+
+        if final:
+            self.run_parse_callbacks()
+
+    def print_help(self, file: Optional[TextIO] = None) -> None:
+        """Prints all the command line options to stderr (or another file)."""
+        if file is None:
+            file = sys.stderr
+        print("Usage: %s [OPTIONS]" % sys.argv[0], file=file)
+        print("\nOptions:\n", file=file)
+        by_group = {}  # type: Dict[str, List[_Option]]
+        for option in self._options.values():
+            by_group.setdefault(option.group_name, []).append(option)
+
+        for filename, o in sorted(by_group.items()):
+            if filename:
+                print("\n%s options:\n" % os.path.normpath(filename), file=file)
+            o.sort(key=lambda option: option.name)
+            for option in o:
+                # Always print names with dashes in a CLI context.
+                prefix = self._normalize_name(option.name)
+                if option.metavar:
+                    prefix += "=" + option.metavar
+                description = option.help or ""
+                if option.default is not None and option.default != "":
+                    description += " (default %s)" % option.default
+                lines = textwrap.wrap(description, 79 - 35)
+                if len(prefix) > 30 or len(lines) == 0:
+                    lines.insert(0, "")
+                print("  --%-30s %s" % (prefix, lines[0]), file=file)
+                for line in lines[1:]:
+                    print("%-34s %s" % (" ", line), file=file)
+        print(file=file)
+
+    def _help_callback(self, value: bool) -> None:
+        if value:
+            self.print_help()
+            sys.exit(0)
+
+    def add_parse_callback(self, callback: Callable[[], None]) -> None:
+        """Adds a parse callback, to be invoked when option parsing is done."""
+        self._parse_callbacks.append(callback)
+
+    def run_parse_callbacks(self) -> None:
+        for callback in self._parse_callbacks:
+            callback()
+
+    def mockable(self) -> "_Mockable":
+        """Returns a wrapper around self that is compatible with
+        `mock.patch <unittest.mock.patch>`.
+
+        The `mock.patch <unittest.mock.patch>` function (included in
+        the standard library `unittest.mock` package since Python 3.3,
+        or in the third-party ``mock`` package for older versions of
+        Python) is incompatible with objects like ``options`` that
+        override ``__getattr__`` and ``__setattr__``.  This function
+        returns an object that can be used with `mock.patch.object
+        <unittest.mock.patch.object>` to modify option values::
+
+            with mock.patch.object(options.mockable(), 'name', value):
+                assert options.name == value
+        """
+        return _Mockable(self)
+
+
+class _Mockable(object):
+    """`mock.patch` compatible wrapper for `OptionParser`.
+
+    As of ``mock`` version 1.0.1, when an object uses ``__getattr__``
+    hooks instead of ``__dict__``, ``patch.__exit__`` tries to delete
+    the attribute it set instead of setting a new one (assuming that
+    the object does not capture ``__setattr__``, so the patch
+    created a new attribute in ``__dict__``).
+
+    _Mockable's getattr and setattr pass through to the underlying
+    OptionParser, and delattr undoes the effect of a previous setattr.
+    """
+
+    def __init__(self, options: OptionParser) -> None:
+        # Modify __dict__ directly to bypass __setattr__
+        self.__dict__["_options"] = options
+        self.__dict__["_originals"] = {}
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._options, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        assert name not in self._originals, "don't reuse mockable objects"
+        self._originals[name] = getattr(self._options, name)
+        setattr(self._options, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        setattr(self._options, name, self._originals.pop(name))
 
 
 class _Option(object):
-    def __init__(self, name, default=None, type=str, help=None, metavar=None,
-                 multiple=False, file_name=None):
+    # This class could almost be made generic, but the way the types
+    # interact with the multiple argument makes this tricky. (default
+    # and the callback use List[T], but type is still Type[T]).
+    UNSET = object()
+
+    def __init__(
+        self,
+        name: str,
+        default: Any = None,
+        type: Optional[type] = None,
+        help: Optional[str] = None,
+        metavar: Optional[str] = None,
+        multiple: bool = False,
+        file_name: Optional[str] = None,
+        group_name: Optional[str] = None,
+        callback: Optional[Callable[[Any], None]] = None,
+    ) -> None:
         if default is None and multiple:
             default = []
         self.name = name
+        if type is None:
+            raise ValueError("type must not be None")
         self.type = type
         self.help = help
         self.metavar = metavar
         self.multiple = multiple
         self.file_name = file_name
+        self.group_name = group_name
+        self.callback = callback
         self.default = default
-        self._value = None
+        self._value = _Option.UNSET  # type: Any
 
-    def value(self):
-        return self.default if self._value is None else self._value
+    def value(self) -> Any:
+        return self.default if self._value is _Option.UNSET else self._value
 
-    def parse(self, value):
+    def parse(self, value: str) -> Any:
         _parse = {
             datetime.datetime: self._parse_datetime,
             datetime.timedelta: self._parse_timedelta,
             bool: self._parse_bool,
-            str: self._parse_string,
-        }.get(self.type, self.type)
+            basestring_type: self._parse_string,
+        }.get(
+            self.type, self.type
+        )  # type: Callable[[str], Any]
         if self.multiple:
-            if self._value is None:
-                self._value = []
+            self._value = []
             for part in value.split(","):
-                if self.type in (int, long):
+                if issubclass(self.type, numbers.Integral):
                     # allow ranges of the form X:Y (inclusive at both ends)
-                    lo, _, hi = part.partition(":")
-                    lo = _parse(lo)
-                    hi = _parse(hi) if hi else lo
-                    self._value.extend(range(lo, hi+1))
+                    lo_str, _, hi_str = part.partition(":")
+                    lo = _parse(lo_str)
+                    hi = _parse(hi_str) if hi_str else lo
+                    self._value.extend(range(lo, hi + 1))
                 else:
                     self._value.append(_parse(part))
         else:
             self._value = _parse(value)
+        if self.callback is not None:
+            self.callback(self._value)
         return self.value()
 
-    def set(self, value):
+    def set(self, value: Any) -> None:
         if self.multiple:
             if not isinstance(value, list):
-                raise Error("Option %r is required to be a list of %s" %
-                            (self.name, self.type.__name__))
+                raise Error(
+                    "Option %r is required to be a list of %s"
+                    % (self.name, self.type.__name__)
+                )
             for item in value:
-                if item != None and not isinstance(item, self.type):
-                    raise Error("Option %r is required to be a list of %s" %
-                                (self.name, self.type.__name__))
+                if item is not None and not isinstance(item, self.type):
+                    raise Error(
+                        "Option %r is required to be a list of %s"
+                        % (self.name, self.type.__name__)
+                    )
         else:
-            if value != None and not isinstance(value, self.type):
-                raise Error("Option %r is required to be a %s" %
-                            (self.name, self.type.__name__))
+            if value is not None and not isinstance(value, self.type):
+                raise Error(
+                    "Option %r is required to be a %s (%s given)"
+                    % (self.name, self.type.__name__, type(value))
+                )
         self._value = value
+        if self.callback is not None:
+            self.callback(self._value)
 
     # Supported date/time formats in our options
     _DATETIME_FORMATS = [
@@ -254,34 +619,33 @@ class _Option(object):
         "%H:%M",
     ]
 
-    def _parse_datetime(self, value):
+    def _parse_datetime(self, value: str) -> datetime.datetime:
         for format in self._DATETIME_FORMATS:
             try:
                 return datetime.datetime.strptime(value, format)
             except ValueError:
                 pass
-        raise Error('Unrecognized date/time format: %r' % value)
+        raise Error("Unrecognized date/time format: %r" % value)
 
-    _TIMEDELTA_ABBREVS = [
-        ('hours', ['h']),
-        ('minutes', ['m', 'min']),
-        ('seconds', ['s', 'sec']),
-        ('milliseconds', ['ms']),
-        ('microseconds', ['us']),
-        ('days', ['d']),
-        ('weeks', ['w']),
-    ]
+    _TIMEDELTA_ABBREV_DICT = {
+        "h": "hours",
+        "m": "minutes",
+        "min": "minutes",
+        "s": "seconds",
+        "sec": "seconds",
+        "ms": "milliseconds",
+        "us": "microseconds",
+        "d": "days",
+        "w": "weeks",
+    }
 
-    _TIMEDELTA_ABBREV_DICT = dict(
-        (abbrev, full) for full, abbrevs in _TIMEDELTA_ABBREVS
-        for abbrev in abbrevs)
-
-    _FLOAT_PATTERN = r'[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?'
+    _FLOAT_PATTERN = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
 
     _TIMEDELTA_PATTERN = re.compile(
-        r'\s*(%s)\s*(\w*)\s*' % _FLOAT_PATTERN, re.IGNORECASE)
+        r"\s*(%s)\s*(\w*)\s*" % _FLOAT_PATTERN, re.IGNORECASE
+    )
 
-    def _parse_timedelta(self, value):
+    def _parse_timedelta(self, value: str) -> datetime.timedelta:
         try:
             sum = datetime.timedelta()
             start = 0
@@ -290,120 +654,89 @@ class _Option(object):
                 if not m:
                     raise Exception()
                 num = float(m.group(1))
-                units = m.group(2) or 'seconds'
+                units = m.group(2) or "seconds"
                 units = self._TIMEDELTA_ABBREV_DICT.get(units, units)
-                sum += datetime.timedelta(**{units: num})
+                # This line confuses mypy when setup.py sets python_version=3.6
+                # https://github.com/python/mypy/issues/9676
+                sum += datetime.timedelta(**{units: num})  # type: ignore
                 start = m.end()
             return sum
-        except:
+        except Exception:
             raise
 
-    def _parse_bool(self, value):
+    def _parse_bool(self, value: str) -> bool:
         return value.lower() not in ("false", "0", "f")
 
-    def _parse_string(self, value):
+    def _parse_string(self, value: str) -> str:
         return _unicode(value)
 
 
-class Error(Exception):
-    """Exception raised by errors in the options module."""
-    pass
+options = OptionParser()
+"""Global options object.
+
+All defined options are available as attributes on this object.
+"""
 
 
-def enable_pretty_logging():
-    """Turns on formatted logging output as configured.
-    
-    This is called automatically by `parse_command_line`.
+def define(
+    name: str,
+    default: Any = None,
+    type: Optional[type] = None,
+    help: Optional[str] = None,
+    metavar: Optional[str] = None,
+    multiple: bool = False,
+    group: Optional[str] = None,
+    callback: Optional[Callable[[Any], None]] = None,
+) -> None:
+    """Defines an option in the global namespace.
+
+    See `OptionParser.define`.
     """
-    root_logger = logging.getLogger()
-    if options.log_file_prefix:
-        channel = logging.handlers.RotatingFileHandler(
-            filename=options.log_file_prefix,
-            maxBytes=options.log_file_max_size,
-            backupCount=options.log_file_num_backups)
-        channel.setFormatter(_LogFormatter(color=False))
-        root_logger.addHandler(channel)
-
-    if (options.log_to_stderr or
-        (options.log_to_stderr is None and not root_logger.handlers)):
-        # Set up color if we are in a tty and curses is installed
-        color = False
-        if curses and sys.stderr.isatty():
-            try:
-                curses.setupterm()
-                if curses.tigetnum("colors") > 0:
-                    color = True
-            except:
-                pass
-        channel = logging.StreamHandler()
-        channel.setFormatter(_LogFormatter(color=color))
-        root_logger.addHandler(channel)
+    return options.define(
+        name,
+        default=default,
+        type=type,
+        help=help,
+        metavar=metavar,
+        multiple=multiple,
+        group=group,
+        callback=callback,
+    )
 
 
+def parse_command_line(
+    args: Optional[List[str]] = None, final: bool = True
+) -> List[str]:
+    """Parses global options from the command line.
 
-class _LogFormatter(logging.Formatter):
-    def __init__(self, color, *args, **kwargs):
-        logging.Formatter.__init__(self, *args, **kwargs)
-        self._color = color
-        if color:
-            # The curses module has some str/bytes confusion in python3.
-            # Most methods return bytes, but only accept strings.
-            # The explict calls to unicode() below are harmless in python2,
-            # but will do the right conversion in python3.
-            fg_color = unicode(curses.tigetstr("setaf") or 
-                               curses.tigetstr("setf") or "", "ascii")
-            self._colors = {
-                logging.DEBUG: unicode(curses.tparm(fg_color, 4), # Blue
-                                       "ascii"),
-                logging.INFO: unicode(curses.tparm(fg_color, 2), # Green
-                                      "ascii"),
-                logging.WARNING: unicode(curses.tparm(fg_color, 3), # Yellow
-                                         "ascii"),
-                logging.ERROR: unicode(curses.tparm(fg_color, 1), # Red
-                                       "ascii"),
-            }
-            self._normal = unicode(curses.tigetstr("sgr0"), "ascii")
-
-    def format(self, record):
-        try:
-            record.message = record.getMessage()
-        except Exception, e:
-            record.message = "Bad message (%r): %r" % (e, record.__dict__)
-        record.asctime = time.strftime(
-            "%y%m%d %H:%M:%S", self.converter(record.created))
-        prefix = '[%(levelname)1.1s %(asctime)s %(module)s:%(lineno)d]' % \
-            record.__dict__
-        if self._color:
-            prefix = (self._colors.get(record.levelno, self._normal) +
-                      prefix + self._normal)
-        formatted = prefix + " " + record.message
-        if record.exc_info:
-            if not record.exc_text:
-                record.exc_text = self.formatException(record.exc_info)
-        if record.exc_text:
-            formatted = formatted.rstrip() + "\n" + record.exc_text
-        return formatted.replace("\n", "\n    ")
+    See `OptionParser.parse_command_line`.
+    """
+    return options.parse_command_line(args, final=final)
 
 
-options = _Options.instance()
+def parse_config_file(path: str, final: bool = True) -> None:
+    """Parses global options from a config file.
+
+    See `OptionParser.parse_config_file`.
+    """
+    return options.parse_config_file(path, final=final)
+
+
+def print_help(file: Optional[TextIO] = None) -> None:
+    """Prints all the command line options to stderr (or another file).
+
+    See `OptionParser.print_help`.
+    """
+    return options.print_help(file)
+
+
+def add_parse_callback(callback: Callable[[], None]) -> None:
+    """Adds a parse callback, to be invoked when option parsing is done.
+
+    See `OptionParser.add_parse_callback`
+    """
+    options.add_parse_callback(callback)
 
 
 # Default options
-define("help", type=bool, help="show this help information")
-define("logging", default="info",
-       help=("Set the Python log level. If 'none', tornado won't touch the "
-             "logging configuration."),
-       metavar="info|warning|error|none")
-define("log_to_stderr", type=bool, default=None,
-       help=("Send log output to stderr (colorized if possible). "
-             "By default use stderr if --log_file_prefix is not set and "
-             "no other logging is configured."))
-define("log_file_prefix", type=str, default=None, metavar="PATH",
-       help=("Path prefix for log files. "
-             "Note that if you are running multiple tornado processes, "
-             "log_file_prefix must be different for each of them (e.g. "
-             "include the port number)"))
-define("log_file_max_size", type=int, default=100 * 1000 * 1000,
-       help="max size of log files before rollover")
-define("log_file_num_backups", type=int, default=10,
-       help="number of log files to keep")
+define_logging_options(options)
