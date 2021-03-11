@@ -37,12 +37,12 @@ class LaunchTransfersTest(unittest.TestCase):
         # grep for output from curl_fake
         curl_lines = re.findall(r'(?m)^# curl.*', err)
 
-        self.assertEquals(4, len(curl_lines))
+        self.assertEquals(3, len(curl_lines))
         # first two are PUT for item creation and GET for testing item
         # last two are the file uploads. with issue #5, command line gets
         # truncated just after '--header Content-MD5:<hex...>'; there's no
         # --upload-file and URL.
-        for l in curl_lines[2:]:
+        for l in curl_lines[1:]:
             assert re.search(r'--upload-file \S+\.warc\.gz ', l)
             assert re.search(r' http://s3\.us\.archive\.org/'+ITEMID+'/.*\.warc\.gz ', l)
 
