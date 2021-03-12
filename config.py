@@ -28,9 +28,9 @@ class DrainConfig(object):
             with open(fname) as f:
                 return yaml.safe_load(f.read())
         except OSError:
-            print >>sys.stderr, "Failed to open %s" % fname
+            print("Failed to open %s" % fname, file=sys.stderr)
         except (yaml.YAMLError, exc):
-            print >>sys.stderr, "Error parsing config:", exc
+            print("Error parsing config:", exc, file=sys.stderr)
             sys.exit(1)
 
     def __check(self, name, vf, msg):
@@ -229,8 +229,8 @@ class DrainConfig(object):
                     open(s3cfg, 'r')
                     return s3cfg
                 except Exception as ex:
-                    print >>sys.stderr, "Error: cannot read %s (by S3CFG)" % (
-                        s3cfg)
+                    print("Error: cannot read %s (by S3CFG)" % (
+                        s3cfg), file=sys.stderr)
                     return None
 
             def candidates():

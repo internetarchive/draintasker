@@ -120,7 +120,7 @@ class Server(threading.Thread):
                                      (r'/(.*)', WebUI, appvars)
                                      ],
                                    template_path=tmpldir)
-        print >>sys.stderr, "Server listening on port %d" % port
+        print("Server listening on port %d" % port, file=sys.stderr)
         self.app.listen(port)
     def run(self):
         ioloop.IOLoop.instance().start()
