@@ -1,5 +1,5 @@
-#!/usr/bin/python
-#
+#!/usr/bin/env python3
+
 import sys
 import os
 import unittest
@@ -24,14 +24,14 @@ class PackWarcsTest(unittest.TestCase):
         # 1/9 GB. as each WARC file is larger than 1/9 GB, pack-warcs.sh will
         # pack just 8 files, leaving 2.
         wnames = ('WIDE-2010121200%02d00-%05d-2145~localhost~9443' % (n, n)
-                  for n in xrange(10))
+                  for n in range(10))
         warcs = ws.create_warcs(wnames, size=ITEM_SIZE/9+1)
         assert len(warcs) == 10
         warcs_packed = []
         total_size = 0
         for w in warcs:
             size = os.path.getsize(w)
-            print "%s %d %d" % (w, size, total_size)
+            print("%s %d %d" % (w, size, total_size))
             if total_size + size > ITEM_SIZE: break
             warcs_packed.append(w)
             total_size += size
@@ -77,7 +77,7 @@ class PackWarcsTest(unittest.TestCase):
         ws = TestSpace(CONF)
 
         ITEM_SIZE = CONF['max_size']*(1024**3)
-        wnames = ('XTUX-part-%05d' % (n,) for n in xrange(10))
+        wnames = ('XTUX-part-%05d' % (n,) for n in range(10))
         warcs1 = ws.create_warcs(wnames, size=ITEM_SIZE/9+1)
         # WARC with unmatching name - should not be packed
         warcs2 = ws.create_warcs(['XTUX-par--00000'])

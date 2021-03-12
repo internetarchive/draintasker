@@ -1,8 +1,10 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+
 """drain job in single mode
 Usage: dtmon.py config
   config = YAML file like dtmon.yml
 """
+
 __author__ = "siznax 2010"
 __version__ = "2.3"
 

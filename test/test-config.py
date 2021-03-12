@@ -1,12 +1,15 @@
-#!/usr/bin/python
-#
+#!/usr/bin/env python3
+
 import sys
 import os
 import re
 import unittest
 import subprocess
 from tempfile import NamedTemporaryFile
-from StringIO import StringIO
+from io import StringIO
+
+sys.path.append(os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../")))
 
 from config import DrainConfig
 
@@ -93,8 +96,9 @@ TESTCONF_BAD_CUSTOM_NAMING = re.sub(
 
 class ConfigTestCase(unittest.TestCase):
     def _conf(self, s):
-        f = NamedTemporaryFile()
-        f.write(s); f.flush()
+        f = NamedTemporaryFile(mode="w")
+        f.write(s)
+        f.flush()
         cf = DrainConfig(f.name)
         f.close()
         return cf

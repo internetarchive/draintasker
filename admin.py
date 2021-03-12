@@ -1,5 +1,5 @@
-#!/usr/bin/python
-#
+#!/usr/bin/env python3
+
 from tornado import ioloop, web, template
 import os, re, sys
 import yaml

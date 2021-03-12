@@ -1,5 +1,7 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
+
 """ time, date, etc. utils """
+
 __author__ = "siznax 2010"
 
 import os, time, datetime, pprint

@@ -1,5 +1,5 @@
-#!/usr/bin/python
-#
+#!/usr/bin/env python3
+
 import sys
 import os
 import re
@@ -14,7 +14,7 @@ from testutils import *
 
 class LaunchTransfersTest(unittest.TestCase):
     
-    def testSubstringFilaneme(self):
+    def testSubstringFilename(self):
         """test for #5 - s3-launch-transfers.sh sends bad Content-MD5 header
         when there are multiple files sharing substring in their filenames.
         """
@@ -35,9 +35,9 @@ class LaunchTransfersTest(unittest.TestCase):
 
         #print err
         # grep for output from curl_fake
-        curl_lines = re.findall(r'(?m)^# curl.*', err)
+        curl_lines = re.findall(r'(?m)^# curl.*', err.decode('utf-8'))
 
-        self.assertEquals(3, len(curl_lines))
+        self.assertEqual(3, len(curl_lines))
         # first two are PUT for item creation and GET for testing item
         # last two are the file uploads. with issue #5, command line gets
         # truncated just after '--header Content-MD5:<hex...>'; there's no

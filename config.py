@@ -1,4 +1,5 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+
 """returns a config dict string from YAML config file
 Usage: config.py file [param]
     file   a YAML config file
@@ -7,12 +8,7 @@ Usage: config.py file [param]
 __author__ = "siznax 2010"
 
 import sys, os, pprint, re
-# svn co http://svn.pyyaml.org/pyyaml/trunk/ lib/pyamml
-#sys.path[0:0] = (os.path.join(sys.path[0], 'lib'),)
-if __name__ == '__main__':
-    libpath = os.path.join(os.path.dirname(__file__), 'lib')
-    if libpath not in sys.path: sys.path.append(libpath)
-import yaml
+from lib import yaml
 
 MAX_ITEM_SIZE_GB = 10
 
@@ -30,17 +26,17 @@ class DrainConfig(object):
         """return config dict from YAML file"""
         try:
             with open(fname) as f:
-                return yaml.load(f.read().decode('utf-8'))
+                return yaml.safe_load(f.read())
         except OSError:
             print >>sys.stderr, "Failed to open %s" % fname
-        except yaml.YAMLError, exc:
+        except (yaml.YAMLError, exc):
             print >>sys.stderr, "Error parsing config:", exc
             sys.exit(1)
 
     def __check(self, name, vf, msg):
         v = self.get_param(name)
         if not vf(v):
-            raise ValueError, '%s %s: %s' % (name, msg, v)
+            raise (ValueError, '%s %s: %s' % (name, msg, v))
  
     def check_integer(self, name):
         self.__check(name, is_integer, 'must be an integer')
@@ -52,11 +48,11 @@ class DrainConfig(object):
         self.check_integer('sleep_time')
         # max_size < MAX_ITEM_SIZE_GB
         if self.cfg['max_size'] > MAX_ITEM_SIZE_GB:
-            raise ValueError, "max_size=%d exceeds MAX_ITEM_SIZE_GB=%d" % (
-                self.cfg['max_size'], MAX_ITEM_SIZE_GB)
+            raise (ValueError, "max_size=%d exceeds MAX_ITEM_SIZE_GB=%d" % (
+                self.cfg['max_size'], MAX_ITEM_SIZE_GB))
         # WARC_naming = 1, 2 or a string
         self.__check('WARC_naming',
-                     lambda x: x in (1, 2) or isinstance(x, basestring),
+                     lambda x: x in (1, 2) or isinstance(x, str),
                      'must be 1 or 2')
         self.validate_naming()
 
@@ -65,8 +61,8 @@ class DrainConfig(object):
 
         # description descriptive with keywords
         if re.search("{describe_effort}", self.cfg['description']):
-            raise ValueError, "desription must not contain "\
-                + "'{describe_effort}'"
+            raise (ValueError, "desription must not contain "\
+                + "'{describe_effort}'")
         #for key in ('CRAWLHOST','CRAWLJOB','START_DATE','END_DATE'):
         #    if not re.search(key, self.cfg['description']):
         #        raise ValueError, "description must contain placeholder " + key
@@ -86,7 +82,7 @@ class DrainConfig(object):
             # these metadata has been moved to "metadata" submap, which
             # automatically incorporates values from old parameters.
             if not metadata.get(key, None):
-                raise ValueError, '%s is missing' % key
+                raise (ValueError, '%s is missing' % key)
 
         # derive is int
         self.check_integer('derive')
@@ -119,8 +115,8 @@ class DrainConfig(object):
                 undefined_symbols.append(ref)
         #print "undefined_symbols=%r" % undefined_symbols
         if undefined_symbols:
-            raise ValueError, 'item_naming has undefined field(s): %s' % \
-                ', '.join(undefined_symbols)
+            raise ValueError('item_naming has undefined field(s): %s' % \
+                ', '.join(undefined_symbols))
 
     @property
     def warc_name_pattern(self):
@@ -186,7 +182,7 @@ class DrainConfig(object):
             if isinstance(v, list):
                 # lower collection first (IA convention)
                 return '/'.join(reversed(v))
-            if isinstance(v, basestring) and v.find(';') >= 0:
+            if isinstance(v, str) and v.find(';') >= 0:
                 # IA-conventional one-string notation
                 return '/'.join(reversed(v.split(';')))
             return v
@@ -274,28 +270,28 @@ class DrainConfig(object):
             v = self.get_param(param)
             if isinstance(v, dict):
                 if format == 'header':
-                    for key, value in v.iteritems():
+                    for key, value in v.items():
                         if re.search(r'\s', key): continue
                         if value is None or value == '': continue
                         for s in format_header(key, value):
-                            print >>out, s
+                            print(s, file=out)
                 else:
-                    for key, value in v.iteritems():
+                    for key, value in v.items():
                         # space in key screws up, so drop it
                         if re.search(r'\s', key): continue
                         if value is None:
-                            print >>out, "%s\t"
+                            print("%s\t", file=out)
                         elif isinstance(value, list):
-                            print >>out, "%s\t%s" % (key, ';'.join(value))
+                            print("%s\t%s" % (key, ';'.join(value)), file=out)
                         else:
-                            print >>out, "%s\t%s" % (key, value)
+                            print("%s\t%s" % (key, value), file=out)
             elif isinstance(v, list):
                 for value in v:
-                    print >>out, value
+                    print(value, file=out)
             elif isinstance(v, bool):
-                print >>out, int(v)
+                print(int(v), file=out)
             else:
-                print >>out, v if v is not None else ''
+                print(v if v is not None else '', file=out)
         
 def format_header(k, v):
     if isinstance(v, list):
@@ -312,7 +308,7 @@ if __name__ == "__main__":
                    help='equivalent of -f header')
     options, args = opt.parse_args()
     if len(args) < 1:
-        print os.path.basename(__file__),  __doc__, __author__
+        print(os.path.basename(__file__),  __doc__, __author__)
         sys.exit(1)
     else:
         config = DrainConfig(args[0])

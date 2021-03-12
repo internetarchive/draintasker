@@ -1,14 +1,16 @@
-#!/usr/bin/python
-#
+#!/usr/bin/env python3
+
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../lib')))
-from tempfile import mkdtemp
 import shutil
 import random
 import gzip
-from StringIO import StringIO
+from tempfile import mkdtemp
+from io import StringIO
 from hashlib import md5
+
+sys.path.append(os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../lib")))
 
 import yaml
 
@@ -82,7 +84,7 @@ class TestSpace(object):
         by creating one gzip-compressed file with warcinfo record
         at the beginning, and copy it for the rest.
         """
-        print >>sys.stderr, "creating test WARCs in %s" % self.jobdir
+        print("creating test WARCs in %s" % self.jobdir, file=sys.stderr)
         chunksize = max(size / 1000, 1000)
         warcs = []
         reuse = None
@@ -96,19 +98,19 @@ class TestSpace(object):
                 shutil.copy(reuse, path)
             else:
                 z = gzip.open(path, 'wb', compresslevel=0)
-                z.write(TEST_WARCINFO)
+                z.write(TEST_WARCINFO.encode())
                 z.close()
                 while os.path.getsize(path) < size:
-                    sys.stdout.write('\r%s %s' %
-                                     (name, os.path.getsize(path)))
+                    sys.stdout.write("\rwriting: %s - current size: %s" %
+                                    (name, os.path.getsize(path)))
                     z = gzip.open(path, 'a')
                     # pack-warcs doesn't care if WARC file content is in fact
                     # WARC records.
                     ss = chunksize
                     while ss > 0:
                         bytes = self.random_bytes(min(ss, 100000))
-                        z.write(bytes)
-                        ss -= len(bytes)
+                        z.write(bytes.encode())
+                        ss -= len(bytes.encode())
                     z.close()
                 reuse = path
             warcs.append(path)
@@ -117,7 +119,7 @@ class TestSpace(object):
 
     def random_bytes(self, length):
         d = StringIO()
-        for i in xrange(length):
+        for i in range(int(length)):
             d.write(chr(int(random.random()*256)))
         return d.getvalue()
 
@@ -126,7 +128,7 @@ class TestSpace(object):
         emulating pack-warcs and make-manifest processes, just true enough for
         testing s3-launch-transfers.
         """
-        print >>sys.stderr, "creating test data in %s" % self.jobdir
+        print("creating test data in %s" % self.jobdir, file=sys.stderr)
         SIZE = 1024
 
         itemdir = os.path.join(self.xferdir, iid)
@@ -144,7 +146,7 @@ class TestSpace(object):
                 bytes = self.random_bytes(SIZE)
                 w.write(bytes)
                 totalsize += SIZE
-                hash.update(bytes)
+                hash.update(bytes.encode('utf-8'))
             sys.stdout.write('\n')
             warcs.append([name, hash.hexdigest()])
         
