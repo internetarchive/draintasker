@@ -36,7 +36,7 @@ class DrainConfig(object):
     def __check(self, name, vf, msg):
         v = self.get_param(name)
         if not vf(v):
-            raise (ValueError, '%s %s: %s' % (name, msg, v))
+            raise ValueError('%s %s: %s' % (name, msg, v))
  
     def check_integer(self, name):
         self.__check(name, is_integer, 'must be an integer')
@@ -48,7 +48,7 @@ class DrainConfig(object):
         self.check_integer('sleep_time')
         # max_size < MAX_ITEM_SIZE_GB
         if self.cfg['max_size'] > MAX_ITEM_SIZE_GB:
-            raise (ValueError, "max_size=%d exceeds MAX_ITEM_SIZE_GB=%d" % (
+            raise ValueError("max_size=%d exceeds MAX_ITEM_SIZE_GB=%d" % (
                 self.cfg['max_size'], MAX_ITEM_SIZE_GB))
         # WARC_naming = 1, 2 or a string
         self.__check('WARC_naming',
@@ -61,7 +61,7 @@ class DrainConfig(object):
 
         # description descriptive with keywords
         if re.search("{describe_effort}", self.cfg['description']):
-            raise (ValueError, "desription must not contain "\
+            raise ValueError("desription must not contain "\
                 + "'{describe_effort}'")
         #for key in ('CRAWLHOST','CRAWLJOB','START_DATE','END_DATE'):
         #    if not re.search(key, self.cfg['description']):
@@ -82,7 +82,7 @@ class DrainConfig(object):
             # these metadata has been moved to "metadata" submap, which
             # automatically incorporates values from old parameters.
             if not metadata.get(key, None):
-                raise (ValueError, '%s is missing' % key)
+                raise ValueError('%s is missing' % key)
 
         # derive is int
         self.check_integer('derive')
