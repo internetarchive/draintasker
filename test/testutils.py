@@ -84,8 +84,9 @@ class TestSpace(object):
         by creating one gzip-compressed file with warcinfo record
         at the beginning, and copy it for the rest.
         """
+        assert isinstance(size, int)
         print("creating test WARCs in %s" % self.jobdir, file=sys.stderr)
-        chunksize = max(size / 1000, 1000)
+        chunksize = max(size // 1000, 1000)
         warcs = []
         reuse = None
         for name in names:
@@ -109,8 +110,8 @@ class TestSpace(object):
                     ss = chunksize
                     while ss > 0:
                         bytes = self.random_bytes(min(ss, 100000))
-                        z.write(bytes.encode())
-                        ss -= len(bytes.encode())
+                        z.write(bytes)
+                        ss -= len(bytes)
                     z.close()
                 reuse = path
             warcs.append(path)
@@ -118,10 +119,8 @@ class TestSpace(object):
         return warcs
 
     def random_bytes(self, length):
-        d = StringIO()
-        for i in range(int(length)):
-            d.write(chr(int(random.random()*256)))
-        return d.getvalue()
+        assert isinstance(length, int)
+        return bytearray(random.getrandbits(8) for i in range(length))
 
     def prepare_launch_transfers(self, iid, names):
         """create new item directory, fake WARC files, PACKED, and MANIFEST,

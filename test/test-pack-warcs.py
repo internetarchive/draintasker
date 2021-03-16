@@ -25,7 +25,7 @@ class PackWarcsTest(unittest.TestCase):
         # pack just 8 files, leaving 2.
         wnames = ('WIDE-2010121200%02d00-%05d-2145~localhost~9443' % (n, n)
                   for n in range(10))
-        warcs = ws.create_warcs(wnames, size=ITEM_SIZE/9+1)
+        warcs = ws.create_warcs(wnames, size=ITEM_SIZE//9+1)
         assert len(warcs) == 10
         warcs_packed = []
         total_size = 0
@@ -78,7 +78,7 @@ class PackWarcsTest(unittest.TestCase):
 
         ITEM_SIZE = CONF['max_size']*(1024**3)
         wnames = ('XTUX-part-%05d' % (n,) for n in range(10))
-        warcs1 = ws.create_warcs(wnames, size=ITEM_SIZE/9+1)
+        warcs1 = ws.create_warcs(wnames, size=ITEM_SIZE//9+1)
         # WARC with unmatching name - should not be packed
         warcs2 = ws.create_warcs(['XTUX-par--00000'])
 
