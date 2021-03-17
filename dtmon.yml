@@ -2,7 +2,7 @@
 #
 # dtmon.yml  - draintasker YAML config file
 #
-# * this file is read everytime it is needed, so your 
+# * this file is read every time it is needed, so your 
 #   changes effect existing processes
 # * please be verbose in {describe_effort} (and remove braces)
 # * required keywords (do note remove them): 
