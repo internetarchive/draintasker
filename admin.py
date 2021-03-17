@@ -1,5 +1,5 @@
-#!/usr/bin/python
-#
+#!/usr/bin/env python3
+
 from tornado import ioloop, web, template
 import os, re, sys
 import yaml
@@ -120,7 +120,7 @@ class Server(threading.Thread):
                                      (r'/(.*)', WebUI, appvars)
                                      ],
                                    template_path=tmpldir)
-        print >>sys.stderr, "Server listening on port %d" % port
+        print("Server listening on port %d" % port, file=sys.stderr)
         self.app.listen(port)
     def run(self):
         ioloop.IOLoop.instance().start()

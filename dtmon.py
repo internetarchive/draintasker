@@ -1,8 +1,10 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+
 """drain job in single mode
 Usage: dtmon.py config
   config = YAML file like dtmon.yml
 """
+
 __author__ = "siznax 2010"
 __version__ = "3.0"
 
@@ -245,10 +247,10 @@ class Project(object):
             self.configobj = config.DrainConfig(self.config_fname)
             try:
                 self.configobj.validate()
-                print "config OK: %s" % self.config_fname
+                print("config OK: %s" % self.config_fname)
             except Exception as ex:
-                print >>sys.stderr, 'Aborting: invalid config %s: %s' % (
-                    self.config_fname, ex)
+                print('Aborting: invalid config %s: %s' % (
+                    self.config_fname, ex), file=sys.stderr)
                 sys.exit(1)
             self.DRAINME = self.configobj['drainme']
             self.sleep = self.configobj['sleep_time']
@@ -349,8 +351,8 @@ class Project(object):
             p = self.run_step(step)
             returncode = p.wait()
             if returncode != 0:
-                print >>sys.stderr, ('ERROR step %s failed with returncode %d' %
-                                     (step, returncode))
+                print(('ERROR step %s failed with returncode %d' %
+                     (step, returncode)), file=sys.stderr)
                 continue
 
     def run_step(self, step, outf=None):
@@ -364,7 +366,7 @@ class Project(object):
         if posthook:
             cmd += (' && ' + posthook)
         cmd = cmd % self.configobj
-        print >>sys.stderr, "%s: %s" % (step, cmd)
+        print("%s: %s" % (step, cmd), file=sys.stderr)
         # TODO set cwd to where config file is located
         p = subprocess.Popen(cmd, shell=True, cwd=self.manager.home,
                              stdout=(outf or sys.stdout),
@@ -431,7 +433,7 @@ class UpLoader:
                 if pj.is_draining():
                     pj.start_drain_job()
                 else:
-                    print "DRAINME file not found: ", pj.DRAINME
+                    print("DRAINME file not found: ", pj.DRAINME)
                 # old code that does not fit new multi-project support.
                 # sleep time would be removed from dtmon.cfg and smarter
                 # scheduling will be implemented. for now, sleeping for
@@ -440,7 +442,7 @@ class UpLoader:
                 # using draintasker with multiple projects.
                 sleep_time = self.sleep or pj.sleep
                 if not once:
-                    print "sleeping %ds" % sleep_time
+                    print("sleeping %ds" % sleep_time)
                     sys.stdout.flush()
                     with self.wakeupcond:
                         self.wakeupcond.wait(timeout=sleep_time)
@@ -495,12 +497,12 @@ if __name__ == "__main__":
             admin.Server(dt, options.port).start()
         except Exception as ex:
             if hasattr(ex, 'errno') and ex.errno == os.errno.EADDRINUSE:
-                print >>sys.stderr, (
+                print((
                     "ERRROR:"
                     "port %d is used by other process. you can either specify"
                     " different port with -p (--http-port) option, or disable"
                     " HTTP status monitoring feature with --no-http option" %
-                    options.port)
+                    options.port), file=sys.stderr)
                 sys.exit(1)
             else:
                 raise
@@ -515,4 +517,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
     finally:
-        print "exiting..."
+        print("exiting...")
