@@ -145,7 +145,7 @@ class TestSpace(object):
                 bytes = self.random_bytes(SIZE)
                 w.write(bytes)
                 totalsize += SIZE
-                hash.update(bytes.encode('utf-8'))
+                hash.update(bytes)
             sys.stdout.write('\n')
             warcs.append([name, hash.hexdigest()])
         
