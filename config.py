@@ -29,7 +29,7 @@ class DrainConfig(object):
                 return yaml.safe_load(f.read())
         except OSError:
             print("Failed to open %s" % fname, file=sys.stderr)
-        except (yaml.YAMLError, exc):
+        except yaml.YAMLError as exc:
             print("Error parsing config:", exc, file=sys.stderr)
             sys.exit(1)
 
