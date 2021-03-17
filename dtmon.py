@@ -4,7 +4,7 @@ Usage: dtmon.py config
   config = YAML file like dtmon.yml
 """
 __author__ = "siznax 2010"
-__version__ = "2.3"
+__version__ = "3.0"
 
 # for man page, "pydoc dtmon"
 
