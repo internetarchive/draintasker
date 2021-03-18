@@ -461,7 +461,7 @@ do
   # XXX - this check is redundant; script should have exitted above
   # if there's missing files. this does not catch extra files.
   if [ ${nfiles_manifest} -ne ${nfiles_found} ]; then
-      echo "ERROR: count mis-match:"\
+      echo "ERROR: count mismatch:"\
 	   "nfiles_manifest=${nfiles_manifest} vs"\
 	   "nfiles_found=${nfiles_found}"\
 	   | tee -a $OPEN

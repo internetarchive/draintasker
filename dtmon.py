@@ -300,7 +300,7 @@ class Project(object):
         else:
             return Storage(exists=False, drainme=False, finishdrain=False,
                            free=0, avail=0)
-        
+
     def uploads(self):
         '''return upload serieses'''
         serieses = []
@@ -319,10 +319,7 @@ class Project(object):
         # TODO should cache Series objects
         xferdir = self.configobj['xfer_dir']
         serdir = os.path.join(xferdir, name)
-        if os.path.isdir(serdir):
-             s = Series(xferdir, name)
-             return s
-        return None
+        return Series(xferdir, name) if os.path.isdir(serdir) else None
 
     def start_packwarcs(self):
         outfile = NamedTemporaryFile(prefix='packwarcs', delete=False)
@@ -498,7 +495,7 @@ if __name__ == "__main__":
         except Exception as ex:
             if hasattr(ex, 'errno') and ex.errno == os.errno.EADDRINUSE:
                 print((
-                    "ERRROR:"
+                    "ERROR:"
                     "port %d is used by other process. you can either specify"
                     " different port with -p (--http-port) option, or disable"
                     " HTTP status monitoring feature with --no-http option" %

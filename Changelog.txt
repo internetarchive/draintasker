@@ -14,7 +14,7 @@ r59 | Fri, 19 Nov 2010
 * added config.py, utils.py for dtmon.py
 * migrated dtmon.sh to python (dtmon.py)
 * migrated dtmon.cfg to YAML (dtmon.yml)
-* verify ETag on S3 PUT success, ERROR on mis-match
+* verify ETag on S3 PUT success, ERROR on mismatch
 * send actual series size for size_hint
 * added eject_tombstones.sh to speed processing
 

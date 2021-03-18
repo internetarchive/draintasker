@@ -135,7 +135,7 @@ class PackWarcsTest(unittest.TestCase):
                          "PACKED 2nd field, number of WARCs, expected %s, got %s" %
                          (len(warcs_packed), packed_fields[1]))
         self.assertEqual(str(total_size), packed_fields[2],
-                         "PACKED 2rd field, total size, expected %s, got %s" %
+                         "PACKED 3rd field, total size, expected %s, got %s" %
                          (total_size, packed_fields[2]))
 
 if __name__ == '__main__':

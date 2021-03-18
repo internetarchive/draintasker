@@ -191,7 +191,7 @@ class ConfigTestCase(unittest.TestCase):
 
     def testPrintHeaderSuppress(self):
         """metadata with null/empty value shall not be included in
-        output. this is used for supressing default values."""
+        output. this is used for suppressing default values."""
         cf = self._conf(TESTCONF_SUPPRESS)
 
         f = StringIO()
