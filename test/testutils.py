@@ -141,7 +141,7 @@ class TestSpace(object):
             sys.stdout.write('%s ' % name)
             # files are not even gzipped :-)
             hash = md5()
-            with open(path, 'w') as w:
+            with open(path, 'wb') as w:
                 bytes = self.random_bytes(SIZE)
                 w.write(bytes)
                 totalsize += SIZE
