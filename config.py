@@ -15,7 +15,7 @@ MAX_ITEM_SIZE_GB = 10
 def is_alnum(x): return x.isalnum()
 def is_integer(x): return type(x) == int
 def is_name(x): return re.match(r'[-_a-zA-Z0-9]+$', x)
-def is_boolean(x): return isinstance(x, (bool, int, long))
+def is_boolean(x): return isinstance(x, (bool, int))
 
 class DrainConfig(object):
     def __init__(self, fname):
@@ -29,7 +29,7 @@ class DrainConfig(object):
                 return yaml.safe_load(f.read())
         except OSError:
             print("Failed to open %s" % fname, file=sys.stderr)
-        except (yaml.YAMLError, exc):
+        except yaml.YAMLError as exc:
             print("Error parsing config:", exc, file=sys.stderr)
             sys.exit(1)
 
@@ -37,7 +37,7 @@ class DrainConfig(object):
         v = self.get_param(name)
         if not vf(v):
             raise ValueError('%s %s: %s' % (name, msg, v))
- 
+
     def check_integer(self, name):
         self.__check(name, is_integer, 'must be an integer')
 
@@ -261,7 +261,7 @@ class DrainConfig(object):
         """returns iterator on parameters defined in YAML.
         (does not include synthetic config parameters)
         """
-        return self.cfg.iteritems()
+        return self.cfg.items()
 
     def pprint(self, param=None, format=None, out=sys.stdout):
         if param is None:
