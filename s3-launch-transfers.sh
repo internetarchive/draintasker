@@ -158,6 +158,14 @@ function write_success {
 function verify_etag {
     if [ -f $tmpfile ]
     then
+        # if we are not using md5sums to save time/bandwidth then return here                                     
+        if [ "$checksum" == "-" ]; then
+            echo "Checksum is turned off"
+            echo "removing tmpfile: $tmpfile"
+            rm $tmpfile
+            return 0
+        fi
+
         # this is a nice solution, thanks to Kenji
         # extract everything between quotes from Etag line, and 
         # immediately quit processing. it's far more efficient, 
@@ -701,6 +709,15 @@ do
       keep_trying=true
       upload_type="add-to-bucket"
       derive_header=(--header 'x-archive-queue-derive:0')
+
+      # if md5sum: no in the config file then make-manifest will put a "-" instead of the                        
+      # actuall checksum. This is for situations where we don't need to double check the upload.                 
+      if [ ! $checksum == "-" ]; then
+        checksum_header=(--header "Content-MD5:${checksum}")                                                      
+      else
+        checksum_header=()
+      fi
+
       while $keep_trying # RETRY loop
       do
 	  printf -- '----\n[%d/%d]: %s\n' $((i+1)) ${#files[@]} "$filename" \
@@ -718,7 +735,7 @@ do
 	      fi
 	      copts=(
 		  "${common_opts[@]}"
-		  --header "Content-MD5:${checksum}"
+		  "${checksum_header[@]}"
 		  "${automakebucket_opts[@]}"
 		  "${derive_header[@]}"
 		  --upload-file "${filepath}"

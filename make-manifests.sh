@@ -1,10 +1,11 @@
 #!/bin/bash 
 #
-# make-manifests.sh xfer_job_dir [mode]
+# make-manifests.sh config xfer_job_dir [mode]
 #
 # foreach PACKED file in xfer_job_dir, computes md5sum of 
 # W/ARCs into MANIFEST file if not extant
 #
+#  config        config params in this file
 #  xfer_job_dir  /{rsync_path}/{JOB}
 #  JOB           crawl job name
 #  PACKED        /{rsync_path}/{JOB}/{warc_series}/PACKED
@@ -13,6 +14,10 @@
 #  [mode]        single = make manifest for 1 series, then exit
 #
 # siznax 2009
+
+PG=$0; test -h $PG && PG=$(readlink $PG)
+BIN=$(dirname $PG)
+: ${GETCONF:=$BIN/config.py}
 
 usage="xfer_job_dir [mode]"
 
@@ -29,11 +34,27 @@ if [ -z "$1" ]; then
   echo Usage: $(basename $0) $usage
   exit 1
 fi
-mode=${2:-0}
+
+mode=${3:-0}
+
+CONFIG=$1
+if [ -n "$CONFIG" ]; then
+  if [ ! -f $CONFIG ]; then
+    echo "ERROR: config not found: $CONFIG"
+    exit 1
+  fi
+# validate configuration
+  $GETCONF $CONFIG || {
+    echo "ERROR: invalid config: $CONFIG"
+    exit 1
+  }
+  MD5SUM=$($GETCONF $CONFIG md5sum)
+fi
+
 
 echo $(basename $0) $(date)
 
-for d in $(find $1 -mindepth 1 -maxdepth 1 -type d | sort); do
+for d in $(find $2 -mindepth 1 -maxdepth 1 -type d | sort); do
 
   PACKED="$d/PACKED"
   [ -e $PACKED ] || continue
@@ -62,11 +83,16 @@ for d in $(find $1 -mindepth 1 -maxdepth 1 -type d | sort); do
     }
     for f in $(ls *.{arc,warc,arc.gz,warc.gz} 2>/dev/null); do
       (( warc_count++ ))
-      echo "  md5sum $(basename $f) >> $OPEN"
-      md5sum $f >&100 || {
-	echo "ERROR: md5sum failed with status: $?"
-	exit 2
-      }
+      if [ $MD5SUM -eq '0' ]; then
+        echo "  NO md5sum $(basename $f) >> $OPEN"
+        echo "-  $(basename $f)" >&100
+      else
+        echo "  md5sum $(basename $f) >> $OPEN"
+        md5sum $f >&100 || {
+          echo "ERROR: md5sum failed with status: $?"
+          exit 2
+        }
+      fi
     done
   ) 100>$OPEN
   echo "  mv $(basename $OPEN) $(basename $MANIFEST)"
