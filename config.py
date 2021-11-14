@@ -10,7 +10,7 @@ __author__ = "siznax 2010"
 import sys, os, pprint, re
 from lib import yaml
 
-MAX_ITEM_SIZE_GB = 10
+MAX_ITEM_SIZE_GB = 500
 
 def is_alnum(x): return x.isalnum()
 def is_integer(x): return type(x) == int
