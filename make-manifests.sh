@@ -19,7 +19,7 @@ PG=$0; test -h $PG && PG=$(readlink $PG)
 BIN=$(dirname $PG)
 : ${GETCONF:=$BIN/config.py}
 
-usage="xfer_job_dir [mode]"
+usage="config xfer_job_dir [mode]"
 
 function report_done {
     echo "$warc_count warcs $manifest_count manifests"
