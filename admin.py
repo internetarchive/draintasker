@@ -1,14 +1,7 @@
 #!/usr/bin/env python3
-
-from tornado import ioloop, web, template
-import os, re, sys
-import yaml
-import itertools
-import subprocess
-from tempfile import NamedTemporaryFile
-from datetime import datetime
-import time
-import threading
+import asyncio
+from tornado import web
+import os, sys
 
 class Storage(object):
     def __init__(self, **kwds):
@@ -18,6 +11,7 @@ class Storage(object):
 class WebUI(web.RequestHandler):
     def initialize(self, manager):
         self.manager = manager
+        self.projects = manager.projects
 
     def get(self, action):
         if action == 'favicon.ico':
@@ -31,11 +25,11 @@ class WebUI(web.RequestHandler):
 
     def get_index(self):
         self.set_header('content-type', 'text/html')
-        self.render('main.html', uname=os.uname(), projects=self.manager.projects)
+        self.render('main.html', uname=os.uname(), projects=self.projects)
     def get_startpackwarcs(self):
         try:
             pj = int(self.get_argument('pj'))
-            pinfo = self.manager.projects[pj].start_packwarcs()
+            pinfo = self.projects[pj].start_packwarcs()
             self.write(dict(ok=1, pid=pinfo.p.pid, out=pinfo.o.name))
         except Exception as ex:
             self.write(dict(ok=0, error=str(ex)))
@@ -43,7 +37,7 @@ class WebUI(web.RequestHandler):
     def get_starttransfers(self):
         try:
             pj = int(self.get_argument('pj'))
-            pinfo = self.manager.projects[pj].start_launchtransfers()
+            pinfo = self.projects[pj].start_launchtransfers()
             self.write(dict(ok=1, pid=pinfo.p.pid, out=pinfo.o.name))
         except Exception as ex:
             self.write(dict(ok=0, error=str(ex)))
@@ -51,7 +45,7 @@ class WebUI(web.RequestHandler):
     def get_retryasap(self):
         try:
             pjid = int(self.get_argument('pj'))
-            pj = self.manager.projects[pjid]
+            pj = self.projects[pjid]
             s = self.get_argument('s')
             series = pj.get_series(s)
             if series is None:
@@ -65,7 +59,7 @@ class WebUI(web.RequestHandler):
     def get_processes(self):
         result = []
         pjid = int(self.get_argument('pj'))
-        pj = self.manager.projects[pjid]
+        pj = self.projects[pjid]
         for proc in pj.processes:
             result.append(dict(st=proc.st, pid=proc.p.pid, o=proc.o.name,
                                c=(proc.p.poll() or 'running'),
@@ -79,13 +73,13 @@ class WebUI(web.RequestHandler):
     def get_drain(self):
         pjid = int(self.get_argument('pj'))
         sw = self.get_argument('sw', '1')
-        pj = self.manager.projects[pjid]
+        pj = self.projects[pjid]
         pj.drain((sw=='1'))
-        self.write(dict(pj=pj.id, sw=p.sw, ok=1))
+        self.write(dict(pj=pj.id, sw=sw, ok=1))
     def get_finishdrain(self):
         pjid = int(self.get_argument('pj'))
         sw = self.get_argument('sw', '1')
-        pj = self.manager.projects[pjid]
+        pj = self.projects[pjid]
         pj.finishdrain((sw=='1'))
         self.write(dict(pj=pj.id, sw=sw, ok=1))
             
@@ -97,7 +91,7 @@ class Files(web.RequestHandler):
             pj, path = pathinfo.split('/', 1)
         except:
             self.send_error(404)
-        xferdir = self.manager.projects[int(pj)].xfer_dir
+        xferdir = self.projects[int(pj)].xfer_dir
         try:
             f = open(os.path.join(xferdir, path))
             while 1:
@@ -109,23 +103,32 @@ class Files(web.RequestHandler):
         except:
             self.send_error(404)
 
-class Server(threading.Thread):
+class Server:
     def __init__(self, manager, port, bindir=None):
-        threading.Thread.__init__(self)
-        self.daemon = True
         self.manager = manager
-        tmpldir = os.path.join(os.path.dirname(__file__), 't')
+        self.port = port
+        self.tmpldir = os.path.join(os.path.dirname(__file__), 't')
         appvars = dict(manager=self.manager)
         self.app = web.Application([ (r'/files/(.*)', Files, appvars),
                                      (r'/(.*)', WebUI, appvars)
                                      ],
-                                   template_path=tmpldir)
-        print("Server listening on port %d" % port, file=sys.stderr)
-        self.app.listen(port)
-    def run(self):
-        ioloop.IOLoop.instance().start()
+                                   template_path=self.tmpldir)
+    async def main(self):
+        print(f"Server listening on port {self.port}", file=sys.stderr)
+        # listen() must be called in the async context.
+        self.app.listen(self.port)
+        # this is essentially "run forever"
+        await asyncio.Event().wait()
+
+    async def test(self):
+        while True:
+            await asyncio.sleep(2)
+            print('tick', file=sys.stderr)
 
 if __name__ == "__main__":
+    class DummyUploader:
+        projects = []
+
     from optparse import OptionParser
     opt = OptionParser('%prog [OPTIONS] DTMON.CFG...')
     opt.add_option('-p', '--port', action='store', dest='port', type='int',
@@ -133,4 +136,4 @@ if __name__ == "__main__":
                    help='port to listen on for HTTP connection')
     options, args = opt.parse_args()
     configs = [ dict(dtconf=os.path.abspath(c)) for c in args ]
-    Server(args, options.port, None).start()
+    asyncio.run(Server(DummyUploader(), options.port, None).main())

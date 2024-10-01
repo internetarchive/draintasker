@@ -6,7 +6,7 @@ Usage: dtmon.py config
 """
 
 __author__ = "siznax 2010"
-__version__ = "3.0"
+__version__ = "3.0.1"
 
 # for man page, "pydoc dtmon"
 
@@ -17,26 +17,11 @@ if libdir not in sys.path:
 import config, utils
 import re
 import subprocess
-import time
 import threading
 import signal
+import errno
 from tempfile import NamedTemporaryFile
 from datetime import datetime
-try:
-    import pwd
-except:
-    pwd = None
-
-def cmp(x, y):  # https://portingguide.readthedocs.io
-    """
-    Replacement for built-in function cmp that was removed in Python 3
-
-    Compare the two objects x and y and return an integer according to
-    the outcome. The return value is negative if x < y, zero if x == y
-    and strictly positive if x > y.
-    """
-    return (x > y) - (x < y)
-
 
 class Storage(object):
     def __init__(self, **kwds):
@@ -322,7 +307,7 @@ class Project(object):
                 if os.path.isdir(p):
                     s = Series(xferdir, e)
                     serieses.append(s)
-        return sorted(serieses, lambda a, b: cmp(a.mtime, b.mtime),
+        return sorted(serieses, key=lambda a: a.mtime,
                       reverse=True)
 
     def get_series(self, name):
@@ -500,20 +485,22 @@ if __name__ == "__main__":
     signal.signal(signal.SIGUSR1, lambda sig, st: dt.wakeup())
 
     if options.run_http_server:
-        import admin
-        try:
-            admin.Server(dt, options.port).start()
-        except Exception as ex:
-            if hasattr(ex, 'errno') and ex.errno == os.errno.EADDRINUSE:
-                print((
-                    "ERROR:"
-                    "port %d is used by other process. you can either specify"
-                    " different port with -p (--http-port) option, or disable"
-                    " HTTP status monitoring feature with --no-http option" %
-                    options.port), file=sys.stderr)
-                sys.exit(1)
-            else:
-                raise
+        import admin, asyncio
+        server = admin.Server(dt, options.port)
+        def run_server():
+            try:
+                asyncio.run(server.main())
+            except OSError as ex:
+                if ex.errno == errno.EADDRINUSE:
+                    print((
+                        "ERROR:"
+                        "port %d is used by other process. you can either specify"
+                        " different port with -p (--http-port) option, or disable"
+                        " HTTP status monitoring feature with --no-http option" %
+                        options.port), file=sys.stderr)
+                    sys.exit(1)
+        threading.Thread(target=run_server, daemon=True).start()
+
     if options.logfile:
         os.close(1)
         assert os.open(options.logfile, os.O_WRONLY|os.O_CREAT) == 1
