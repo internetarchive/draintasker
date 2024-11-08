@@ -119,7 +119,7 @@ function warc_software {
 }
 	
 function echo_curl_output {
-    echo "http://${s3}/${bucket}/${filename}" | tee -a $TASK
+    echo "https://${s3}/${bucket}/${filename}" | tee -a $TASK
     echo "  response_code $1" | tee -a $TASK
     echo "  size_upload_bytes $2" | tee -a $TASK
     echo "  total_time_seconds $3" | tee -a $TASK
@@ -303,7 +303,7 @@ function curl_s3 {
     fi
     curl_cmd=(
 	$CURL -vv "${copts[@]}"
-	http://${s3}/${bucket}/${filename}
+	https://${s3}/${bucket}/${filename}
 	-o "$tmpfile"
     )
     echo "${curl_cmd[*]}" \
