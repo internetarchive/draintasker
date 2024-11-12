@@ -503,7 +503,7 @@ if __name__ == "__main__":
 
     if options.logfile:
         os.close(1)
-        assert os.open(options.logfile, os.O_WRONLY|os.O_CREAT) == 1
+        assert os.open(options.logfile, os.O_WRONLY|os.O_CREAT, mode=0o644) == 1
         os.lseek(1, 0, 2)
         os.close(2)
         assert os.dup(1) == 2
