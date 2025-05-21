@@ -738,6 +738,7 @@ do
 		  "${checksum_header[@]}"
 		  "${automakebucket_opts[@]}"
 		  "${derive_header[@]}"
+          --expect100-timeout 20
 		  --upload-file "${filepath}"
 	      )
 	      curl_s3
