@@ -302,7 +302,7 @@ function curl_s3 {
         echo "RETRY attempt (${retry_count})" `date` | tee -a $OPEN
     fi
     curl_cmd=(
-	$CURL -vv "${copts[@]}"
+	$CURL -v "${copts[@]}"
 	https://${s3}/${bucket}/${filename}
 	-o "$tmpfile"
     )
@@ -738,6 +738,7 @@ do
 		  "${checksum_header[@]}"
 		  "${automakebucket_opts[@]}"
 		  "${derive_header[@]}"
+		  --expect100-timeout 20
 		  --upload-file "${filepath}"
 	      )
 	      curl_s3
