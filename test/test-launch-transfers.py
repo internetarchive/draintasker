@@ -44,7 +44,7 @@ class LaunchTransfersTest(unittest.TestCase):
         # --upload-file and URL.
         for l in curl_lines[1:]:
             assert re.search(r'--upload-file \S+\.warc\.gz ', l)
-            assert re.search(r' http://s3\.us\.archive\.org/'+ITEMID+'/.*\.warc\.gz ', l)
+            assert re.search(r' https://s3\.us\.archive\.org/'+ITEMID+'/.*\.warc\.gz ', l)
 
             
         
