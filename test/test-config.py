@@ -142,8 +142,6 @@ class ConfigTestCase(unittest.TestCase):
         assert md['operator'] == 'crawl@archive.org'
         assert md['scanningcenter'] == 'sanfrancisco'
 
-        assert md['scanner'] == os.uname()[1]
-
         assert md['mediatype'] == 'web'
         assert md['subject'] == 'crawldata'
 

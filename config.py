@@ -213,8 +213,7 @@ class DrainConfig(object):
                     'scanningcenter'
                     )
                 if name in self.cfg
-                ], mediatype='web', subject='crawldata',
-                scanner=os.uname()[1])
+                ], mediatype='web', subject='crawldata')
             # values in "metadata" param take precedence over top-level
             # metadata.
             v = self.cfg.get(param)
